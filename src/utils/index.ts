@@ -1,4 +1,5 @@
 import { LOG_END_SYMBOL } from './const';
+import cron_parser from 'cron-parser';
 
 export default function browserType() {
   // 权重：系统 + 系统版本 > 平台 > 内核 + 载体 + 内核版本 + 载体版本 > 外壳 + 外壳版本
@@ -152,9 +153,9 @@ export default function browserType() {
     shell === 'none'
       ? {}
       : {
-        shell, // wechat qq uc 360 2345 sougou liebao maxthon
-        shellVs,
-      },
+          shell, // wechat qq uc 360 2345 sougou liebao maxthon
+          shellVs,
+        },
   );
 
   console.log(
@@ -272,6 +273,29 @@ export function depthFirstSearch<
   return c;
 }
 
+export function findNode<T extends Record<string, any> & { children?: T[] }>(
+  children: T[],
+  condition: (column: T) => boolean,
+) {
+  const c = [...children];
+
+  let item;
+  function find(cls: T[] | undefined): T | undefined {
+    if (!cls) return;
+    for (let i = 0; i < cls?.length; i++) {
+      if (condition(cls[i])) {
+        item = cls[i];
+      } else if (cls[i].children) {
+        find(cls[i].children);
+      }
+    }
+  }
+
+  find(c);
+
+  return item;
+}
+
 export function logEnded(log: string): boolean {
   const endTips = [LOG_END_SYMBOL, '执行结束'];
   return endTips.some((x) => log.includes(x));
@@ -302,4 +326,15 @@ export function getCommandScript(
     p = '';
   }
   return [s, p];
+}
+
+export function parseCrontab(schedule: string): Date {
+  try {
+    const time = cron_parser.parseExpression(schedule);
+    if (time) {
+      return time.next().toDate();
+    }
+  } catch (error) {}
+
+  return new Date('1970');
 }

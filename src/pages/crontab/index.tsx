@@ -51,7 +51,7 @@ import ViewManageModal from './viewManageModal';
 import { FilterValue, SorterResult } from 'antd/lib/table/interface';
 import { SharedContext } from '@/layouts';
 import useTableScrollHeight from '@/hooks/useTableScrollHeight';
-import { getCommandScript } from '@/utils';
+import { getCommandScript, parseCrontab } from '@/utils';
 import { ColumnProps } from 'antd/lib/table';
 import { VList } from 'virtuallist-antd';
 
@@ -263,13 +263,12 @@ const Crontab = () => {
           .replace(' 24:', ' 00:');
       },
     },
-
     {
       title: '状态',
       key: 'status',
       dataIndex: 'status',
       align: 'center' as const,
-      width: 85,
+      width: 88,
       filters: [
         {
           text: '运行中',
@@ -447,10 +446,7 @@ const Crontab = () => {
             data.map((x) => {
               return {
                 ...x,
-                nextRunTime: cron_parser
-                  .parseExpression(x.schedule)
-                  .next()
-                  .toDate(),
+                nextRunTime: parseCrontab(x.schedule),
               };
             }),
           );
@@ -737,10 +733,7 @@ const Crontab = () => {
         if (code === 200) {
           const index = value.findIndex((x) => x.id === cron.id);
           const result = [...value];
-          data.nextRunTime = cron_parser
-            .parseExpression(data.schedule)
-            .next()
-            .toDate();
+          data.nextRunTime = parseCrontab(data.schedule);
           if (index !== -1) {
             result.splice(index, 1, {
               ...cron,
@@ -931,6 +924,7 @@ const Crontab = () => {
   const vComponents = useMemo(() => {
     return VList({
       height: tableScrollHeight!,
+      resetTopWhenDataChange: false,
     });
   }, [tableScrollHeight]);
 
