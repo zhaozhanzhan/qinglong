@@ -8,13 +8,8 @@ import {
 } from '@ant-design/icons';
 import { PageLoading } from '@ant-design/pro-layout';
 import { logEnded } from '@/utils';
+import { CrontabStatus } from './type';
 
-enum CrontabStatus {
-  'running',
-  'idle',
-  'disabled',
-  'queued',
-}
 const { Countdown } = Statistic;
 
 const CronLogModal = ({
@@ -54,7 +49,7 @@ const CronLogModal = ({
             log &&
               !logEnded(log) &&
               !log.includes('重启面板') &&
-              !log.includes('任务未运行或运行失败，请尝试手动运行'),
+              !log.includes('任务未运行'),
           );
           setExecuting(hasNext);
           autoScroll();

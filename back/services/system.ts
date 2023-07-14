@@ -2,14 +2,27 @@ import { Service, Inject } from 'typedi';
 import winston from 'winston';
 import config from '../config';
 import * as fs from 'fs';
-import { AuthDataType, AuthInfo, AuthModel, LoginStatus } from '../data/auth';
+import {
+  AuthDataType,
+  AuthInfo,
+  AuthInstance,
+  AuthModel,
+  AuthModelInfo,
+} from '../data/auth';
 import { NotificationInfo } from '../data/notify';
 import NotificationService from './notify';
-import ScheduleService from './schedule';
-import { spawn } from 'child_process';
+import ScheduleService, { TaskCallbacks } from './schedule';
+import { spawn } from 'cross-spawn';
 import SockService from './sock';
 import got from 'got';
-import { parseContentVersion, parseVersion } from '../config/util';
+import {
+  getPid,
+  killTask,
+  parseContentVersion,
+  parseVersion,
+} from '../config/util';
+import { TASK_COMMAND } from '../config/const';
+import taskLimit from '../shared/pLimit';
 
 @Service()
 export default class SystemService {
@@ -22,20 +35,20 @@ export default class SystemService {
     private sockService: SockService,
   ) {}
 
-  public async getLogRemoveFrequency() {
-    const doc = await this.getDb({ type: AuthDataType.removeLogFrequency });
-    return doc || {};
+  public async getSystemConfig() {
+    const doc = await this.getDb({ type: AuthDataType.systemConfig });
+    return doc || ({} as AuthInstance);
   }
 
-  private async updateAuthDb(payload: AuthInfo): Promise<any> {
+  private async updateAuthDb(payload: AuthInfo): Promise<AuthInstance> {
     await AuthModel.upsert({ ...payload });
     const doc = await this.getDb({ type: payload.type });
     return doc;
   }
 
-  public async getDb(query: any): Promise<any> {
+  public async getDb(query: any): Promise<AuthInstance> {
     const doc: any = await AuthModel.findOne({ where: { ...query } });
-    return doc && (doc.get({ plain: true }) as any);
+    return doc && doc.get({ plain: true });
   }
 
   public async updateNotificationMode(notificationInfo: NotificationInfo) {
@@ -56,25 +69,30 @@ export default class SystemService {
     }
   }
 
-  public async updateLogRemoveFrequency(frequency: number) {
-    const oDoc = await this.getLogRemoveFrequency();
+  public async updateSystemConfig(info: AuthModelInfo) {
+    const oDoc = await this.getSystemConfig();
     const result = await this.updateAuthDb({
       ...oDoc,
-      type: AuthDataType.removeLogFrequency,
-      info: { frequency },
+      type: AuthDataType.systemConfig,
+      info,
     });
-    const cron = {
-      id: result.id,
-      name: '删除日志',
-      command: `ql rmlog ${frequency}`,
-    };
-    await this.scheduleService.cancelIntervalTask(cron);
-    if (frequency > 0) {
-      this.scheduleService.createIntervalTask(cron, {
-        days: frequency,
-      });
+    if (info.logRemoveFrequency) {
+      const cron = {
+        id: result.id,
+        name: '删除日志',
+        command: `ql rmlog ${info.logRemoveFrequency}`,
+      };
+      await this.scheduleService.cancelIntervalTask(cron);
+      if (info.logRemoveFrequency > 0) {
+        this.scheduleService.createIntervalTask(cron, {
+          days: info.logRemoveFrequency,
+        });
+      }
     }
-    return { code: 200, data: { ...cron } };
+    if (info.cronConcurrency) {
+      await taskLimit.setCustomLimit(info.cronConcurrency);
+    }
+    return { code: 200, data: info };
   }
 
   public async checkUpdate() {
@@ -136,7 +154,7 @@ export default class SystemService {
   }
 
   public async updateSystem() {
-    const cp = spawn('ql -l update', { shell: '/bin/bash' });
+    const cp = spawn('ql -l update false', { shell: '/bin/bash' });
 
     cp.stdout.on('data', (data) => {
       this.sockService.sendMessage({
@@ -162,12 +180,74 @@ export default class SystemService {
     return { code: 200 };
   }
 
+  public async reloadSystem() {
+    const cp = spawn('ql -l reload', { shell: '/bin/bash' });
+
+    cp.stdout.on('data', (data) => {
+      this.sockService.sendMessage({
+        type: 'reloadSystem',
+        message: data.toString(),
+      });
+    });
+
+    cp.stderr.on('data', (data) => {
+      this.sockService.sendMessage({
+        type: 'reloadSystem',
+        message: data.toString(),
+      });
+    });
+
+    cp.on('error', (err) => {
+      this.sockService.sendMessage({
+        type: 'reloadSystem',
+        message: JSON.stringify(err),
+      });
+    });
+
+    return { code: 200 };
+  }
+
   public async notify({ title, content }: { title: string; content: string }) {
     const isSuccess = await this.notificationService.notify(title, content);
     if (isSuccess) {
       return { code: 200, message: '通知发送成功' };
     } else {
       return { code: 400, message: '通知发送失败，请检查系统设置/通知配置' };
+    }
+  }
+
+  public async run(
+    { command, logPath }: { command: string; logPath: string },
+    callback: TaskCallbacks,
+  ) {
+    if (!command.startsWith(TASK_COMMAND)) {
+      command = `${TASK_COMMAND} ${command}`;
+    }
+    this.scheduleService.runTask(
+      `real_log_path=${logPath} real_time=true ${command}`,
+      callback,
+    );
+  }
+
+  public async stop({ command, pid }: { command: string; pid: number }) {
+    if (!pid && !command) {
+      return { code: 400, message: '参数错误' };
+    }
+
+    if (pid) {
+      await killTask(pid);
+      return { code: 200 };
+    }
+
+    if (!command.startsWith(TASK_COMMAND)) {
+      command = `${TASK_COMMAND} ${command}`;
+    }
+    const _pid = await getPid(command);
+    if (_pid) {
+      await killTask(_pid);
+      return { code: 200 };
+    } else {
+      return { code: 400, message: '任务未找到' };
     }
   }
 }

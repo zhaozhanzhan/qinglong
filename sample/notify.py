@@ -76,6 +76,8 @@ push_config = {
     'QMSG_KEY': '',                     # qmsg 酱的 QMSG_KEY
     'QMSG_TYPE': '',                    # qmsg 酱的 QMSG_TYPE
 
+    'QYWX_ORIGIN': '',                  # 企业微信代理地址
+    
     'QYWX_AM': '',                      # 企业微信应用
 
     'QYWX_KEY': '',                     # 企业微信机器人
@@ -220,7 +222,7 @@ def go_cqhttp(title: str, content: str) -> None:
         print("go-cqhttp 推送失败！")
 
 
-def gotify(title:str,content:str)  -> None:
+def gotify(title: str, content: str) -> None:
     """
     使用 gotify 推送消息。
     """
@@ -230,8 +232,12 @@ def gotify(title:str,content:str)  -> None:
     print("gotify 服务启动")
 
     url = f'{push_config.get("GOTIFY_URL")}/message?token={push_config.get("GOTIFY_TOKEN")}'
-    data = {"title": title,"message": content,"priority": push_config.get("GOTIFY_PRIORITY")}
-    response = requests.post(url,data=data).json()
+    data = {
+        "title": title,
+        "message": content,
+        "priority": push_config.get("GOTIFY_PRIORITY"),
+    }
+    response = requests.post(url, data=data).json()
 
     if response.get("id"):
         print("gotify 推送成功！")
@@ -269,10 +275,10 @@ def serverJ(title: str, content: str) -> None:
     print("serverJ 服务启动")
 
     data = {"text": title, "desp": content.replace("\n", "\n\n")}
-    if push_config.get("PUSH_KEY").index("SCT") != -1:
+    if push_config.get("PUSH_KEY").find("SCT") != -1:
         url = f'https://sctapi.ftqq.com/{push_config.get("PUSH_KEY")}.send'
     else:
-        url = f'https://sc.ftqq.com/${push_config.get("PUSH_KEY")}.send'
+        url = f'https://sc.ftqq.com/{push_config.get("PUSH_KEY")}.send'
     response = requests.post(url, data=data).json()
 
     if response.get("errno") == 0 or response.get("code") == 0:
@@ -289,8 +295,13 @@ def pushdeer(title: str, content: str) -> None:
         print("PushDeer 服务的 DEER_KEY 未设置!!\n取消推送")
         return
     print("PushDeer 服务启动")
-    data = {"text": title, "desp": content, "type": "markdown", "pushkey": push_config.get("DEER_KEY")}
-    url = 'https://api2.pushdeer.com/message/push'
+    data = {
+        "text": title,
+        "desp": content,
+        "type": "markdown",
+        "pushkey": push_config.get("DEER_KEY"),
+    }
+    url = "https://api2.pushdeer.com/message/push"
     if push_config.get("DEER_URL"):
         url = push_config.get("DEER_URL")
 
@@ -310,7 +321,7 @@ def chat(title: str, content: str) -> None:
         print("chat 服务的 CHAT_URL或CHAT_TOKEN 未设置!!\n取消推送")
         return
     print("chat 服务启动")
-    data = 'payload=' + json.dumps({'text': title + '\n' + content})
+    data = "payload=" + json.dumps({"text": title + "\n" + content})
     url = push_config.get("CHAT_URL") + push_config.get("CHAT_TOKEN")
     response = requests.post(url, data=data)
 
@@ -318,7 +329,6 @@ def chat(title: str, content: str) -> None:
         print("Chat 推送成功！")
     else:
         print("Chat 推送失败！错误信息：", response)
-
 
 
 def pushplus_bot(title: str, content: str) -> None:
@@ -345,7 +355,6 @@ def pushplus_bot(title: str, content: str) -> None:
         print("PUSHPLUS 推送成功！")
 
     else:
-
         url_old = "http://pushplus.hxtrip.com/send"
         headers["Accept"] = "application/json"
         response = requests.post(url=url_old, data=body, headers=headers).json()
@@ -416,9 +425,12 @@ class WeCom:
         self.CORPID = corpid
         self.CORPSECRET = corpsecret
         self.AGENTID = agentid
+        self.ORIGIN = "https://qyapi.weixin.qq.com"
+        if push_config.get("QYWX_ORIGIN"):
+            self.ORIGIN = push_config.get("QYWX_ORIGIN")
 
     def get_access_token(self):
-        url = "https://qyapi.weixin.qq.com/cgi-bin/gettoken"
+        url = f"{self.ORIGIN}/cgi-bin/gettoken"
         values = {
             "corpid": self.CORPID,
             "corpsecret": self.CORPSECRET,
@@ -428,10 +440,7 @@ class WeCom:
         return data["access_token"]
 
     def send_text(self, message, touser="@all"):
-        send_url = (
-            "https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token="
-            + self.get_access_token()
-        )
+        send_url = f"{self.ORIGIN}/cgi-bin/message/send?access_token={self.get_access_token()}"
         send_values = {
             "touser": touser,
             "msgtype": "text",
@@ -445,10 +454,7 @@ class WeCom:
         return respone["errmsg"]
 
     def send_mpnews(self, title, message, media_id, touser="@all"):
-        send_url = (
-            "https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token="
-            + self.get_access_token()
-        )
+        send_url = f"https://{self.HOST}/cgi-bin/message/send?access_token={self.get_access_token()}"
         send_values = {
             "touser": touser,
             "msgtype": "mpnews",
@@ -481,7 +487,11 @@ def wecom_bot(title: str, content: str) -> None:
         return
     print("企业微信机器人服务启动")
 
-    url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={push_config.get('QYWX_KEY')}"
+    origin = "https://qyapi.weixin.qq.com"
+    if push_config.get("QYWX_ORIGIN"):
+        origin = push_config.get("QYWX_ORIGIN")
+
+    url = f"{origin}/cgi-bin/webhook/send?key={push_config.get('QYWX_KEY')}"
     headers = {"Content-Type": "application/json;charset=utf-8"}
     data = {"msgtype": "text", "text": {"content": f"{title}\n\n{content}"}}
     response = requests.post(
@@ -543,24 +553,28 @@ def aibotk(title: str, content: str) -> None:
     """
     使用 智能微秘书 推送消息。
     """
-    if not push_config.get("AIBOTK_KEY") or not push_config.get("AIBOTK_TYPE") or not push_config.get("AIBOTK_NAME"):
+    if (
+        not push_config.get("AIBOTK_KEY")
+        or not push_config.get("AIBOTK_TYPE")
+        or not push_config.get("AIBOTK_NAME")
+    ):
         print("智能微秘书 的 AIBOTK_KEY 或者 AIBOTK_TYPE 或者 AIBOTK_NAME 未设置!!\n取消推送")
         return
     print("智能微秘书 服务启动")
 
-    if push_config.get("AIBOTK_TYPE") == 'room':
+    if push_config.get("AIBOTK_TYPE") == "room":
         url = "https://api-bot.aibotk.com/openapi/v1/chat/room"
         data = {
             "apiKey": push_config.get("AIBOTK_KEY"),
             "roomName": push_config.get("AIBOTK_NAME"),
-            "message": {"type": 1, "content": f'【青龙快讯】\n\n${title}\n${content}' }
+            "message": {"type": 1, "content": f"【青龙快讯】\n\n{title}\n{content}"},
         }
     else:
         url = "https://api-bot.aibotk.com/openapi/v1/chat/contact"
         data = {
             "apiKey": push_config.get("AIBOTK_KEY"),
             "name": push_config.get("AIBOTK_NAME"),
-            "message": {"type": 1, "content": f'【青龙快讯】\n\n${title}\n${content}' }
+            "message": {"type": 1, "content": f"【青龙快讯】\n\n{title}\n{content}"},
         }
     body = json.dumps(data).encode(encoding="utf-8")
     headers = {"Content-Type": "application/json"}
@@ -576,24 +590,52 @@ def smtp(title: str, content: str) -> None:
     """
     使用 SMTP 邮件 推送消息。
     """
-    if not push_config.get("SMTP_SERVER") or not push_config.get("SMTP_SSL") or not push_config.get("SMTP_EMAIL") or not push_config.get("SMTP_PASSWORD") or not push_config.get("SMTP_NAME"):
-        print("SMTP 邮件 的 SMTP_SERVER 或者 SMTP_SSL 或者 SMTP_EMAIL 或者 SMTP_PASSWORD 或者 SMTP_NAME 未设置!!\n取消推送")
+    if (
+        not push_config.get("SMTP_SERVER")
+        or not push_config.get("SMTP_SSL")
+        or not push_config.get("SMTP_EMAIL")
+        or not push_config.get("SMTP_PASSWORD")
+        or not push_config.get("SMTP_NAME")
+    ):
+        print(
+            "SMTP 邮件 的 SMTP_SERVER 或者 SMTP_SSL 或者 SMTP_EMAIL 或者 SMTP_PASSWORD 或者 SMTP_NAME 未设置!!\n取消推送"
+        )
         return
     print("SMTP 邮件 服务启动")
 
-    message = MIMEText(content, 'plain', 'utf-8')
-    message['From'] = formataddr((Header(push_config.get("SMTP_NAME"), 'utf-8').encode(), push_config.get("SMTP_EMAIL")))
-    message['To'] = formataddr((Header(push_config.get("SMTP_NAME"), 'utf-8').encode(), push_config.get("SMTP_EMAIL")))
-    message['Subject'] = Header(title, 'utf-8')
+    message = MIMEText(content, "plain", "utf-8")
+    message["From"] = formataddr(
+        (
+            Header(push_config.get("SMTP_NAME"), "utf-8").encode(),
+            push_config.get("SMTP_EMAIL"),
+        )
+    )
+    message["To"] = formataddr(
+        (
+            Header(push_config.get("SMTP_NAME"), "utf-8").encode(),
+            push_config.get("SMTP_EMAIL"),
+        )
+    )
+    message["Subject"] = Header(title, "utf-8")
 
     try:
-        smtp_server = smtplib.SMTP_SSL(push_config.get("SMTP_SERVER")) if push_config.get("SMTP_SSL") == 'true' else smtplib.SMTP(push_config.get("SMTP_SERVER"))
-        smtp_server.login(push_config.get("SMTP_EMAIL"), push_config.get("SMTP_PASSWORD"))
-        smtp_server.sendmail(push_config.get("SMTP_EMAIL"), push_config.get("SMTP_EMAIL"), message.as_bytes())
+        smtp_server = (
+            smtplib.SMTP_SSL(push_config.get("SMTP_SERVER"))
+            if push_config.get("SMTP_SSL") == "true"
+            else smtplib.SMTP(push_config.get("SMTP_SERVER"))
+        )
+        smtp_server.login(
+            push_config.get("SMTP_EMAIL"), push_config.get("SMTP_PASSWORD")
+        )
+        smtp_server.sendmail(
+            push_config.get("SMTP_EMAIL"),
+            push_config.get("SMTP_EMAIL"),
+            message.as_bytes(),
+        )
         smtp_server.close()
         print("SMTP 邮件 推送成功！")
     except Exception as e:
-        print(f'SMTP 邮件 推送失败！{e}')
+        print(f"SMTP 邮件 推送失败！{e}")
 
 
 def one() -> str:
@@ -636,9 +678,19 @@ if push_config.get("QYWX_KEY"):
     notify_function.append(wecom_bot)
 if push_config.get("TG_BOT_TOKEN") and push_config.get("TG_USER_ID"):
     notify_function.append(telegram_bot)
-if push_config.get("AIBOTK_KEY") and push_config.get("AIBOTK_TYPE") and push_config.get("AIBOTK_NAME"):
+if (
+    push_config.get("AIBOTK_KEY")
+    and push_config.get("AIBOTK_TYPE")
+    and push_config.get("AIBOTK_NAME")
+):
     notify_function.append(aibotk)
-if push_config.get("SMTP_SERVER") and push_config.get("SMTP_SSL") and push_config.get("SMTP_EMAIL") and push_config.get("SMTP_PASSWORD") and push_config.get("SMTP_NAME"):
+if (
+    push_config.get("SMTP_SERVER")
+    and push_config.get("SMTP_SSL")
+    and push_config.get("SMTP_EMAIL")
+    and push_config.get("SMTP_PASSWORD")
+    and push_config.get("SMTP_NAME")
+):
     notify_function.append(smtp)
 
 
@@ -646,6 +698,13 @@ def send(title: str, content: str) -> None:
     if not content:
         print(f"{title} 推送内容为空！")
         return
+
+    # 根据标题跳过一些消息推送，环境变量：SKIP_PUSH_TITLE 用回车分隔
+    skipTitle = os.getenv("SKIP_PUSH_TITLE")
+    if skipTitle:
+        if title in re.split("\n", skipTitle):
+            print(f"{title} 在SKIP_PUSH_TITLE环境变量内，跳过推送！")
+            return
 
     hitokoto = push_config.get("HITOKOTO")
 

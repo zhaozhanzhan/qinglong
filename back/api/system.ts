@@ -7,7 +7,12 @@ import SystemService from '../services/system';
 import { celebrate, Joi } from 'celebrate';
 import UserService from '../services/user';
 import { EnvModel } from '../data/env';
-import { parseVersion, promiseExec } from '../config/util';
+import {
+  getUniqPath,
+  handleLogPath,
+  parseVersion,
+  promiseExec,
+} from '../config/util';
 import dayjs from 'dayjs';
 
 const route = Router();
@@ -20,30 +25,15 @@ export default (app: Router) => {
     try {
       const userService = Container.get(UserService);
       const authInfo = await userService.getUserInfo();
-      const envCount = await EnvModel.count();
-      const { version, changeLog, changeLogLink } = await parseVersion(
+      const { version, changeLog, changeLogLink, publishTime } = await parseVersion(
         config.versionFile,
       );
-      const lastCommitTime = (
-        await promiseExec(
-          `cd ${config.rootPath} && git show -s --format=%ai | head -1`,
-        )
-      ).replace('\n', '');
-      const lastCommitId = (
-        await promiseExec(`cd ${config.rootPath} && git rev-parse --short HEAD`)
-      ).replace('\n', '');
-      const branch = (
-        await promiseExec(
-          `cd ${config.rootPath} && git symbolic-ref --short HEAD`,
-        )
-      ).replace('\n', '');
 
       let isInitialized = true;
       if (
         Object.keys(authInfo).length === 2 &&
         authInfo.username === 'admin' &&
-        authInfo.password === 'admin' &&
-        envCount === 0
+        authInfo.password === 'admin'
       ) {
         isInitialized = false;
       }
@@ -52,9 +42,8 @@ export default (app: Router) => {
         data: {
           isInitialized,
           version,
-          lastCommitTime: dayjs(lastCommitTime).unix(),
-          lastCommitId,
-          branch,
+          publishTime: dayjs(publishTime).unix(),
+          branch: process.env.QL_BRANCH || 'master',
           changeLog,
           changeLogLink,
         },
@@ -66,12 +55,12 @@ export default (app: Router) => {
   });
 
   route.get(
-    '/log/remove',
+    '/config',
     async (req: Request, res: Response, next: NextFunction) => {
       const logger: Logger = Container.get('logger');
       try {
         const systemService = Container.get(SystemService);
-        const data = await systemService.getLogRemoveFrequency();
+        const data = await systemService.getSystemConfig();
         res.send({ code: 200, data });
       } catch (e) {
         return next(e);
@@ -80,19 +69,18 @@ export default (app: Router) => {
   );
 
   route.put(
-    '/log/remove',
+    '/config',
     celebrate({
       body: Joi.object({
-        frequency: Joi.number().required(),
+        logRemoveFrequency: Joi.number().optional().allow(null),
+        cronConcurrency: Joi.number().optional().allow(null),
       }),
     }),
     async (req: Request, res: Response, next: NextFunction) => {
       const logger: Logger = Container.get('logger');
       try {
         const systemService = Container.get(SystemService);
-        const result = await systemService.updateLogRemoveFrequency(
-          req.body.frequency,
-        );
+        const result = await systemService.updateSystemConfig(req.body);
         res.send(result);
       } catch (e) {
         return next(e);
@@ -129,6 +117,20 @@ export default (app: Router) => {
   );
 
   route.put(
+    '/reload',
+    async (req: Request, res: Response, next: NextFunction) => {
+      const logger: Logger = Container.get('logger');
+      try {
+        const systemService = Container.get(SystemService);
+        const result = await systemService.reloadSystem();
+        res.send(result);
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.put(
     '/notify',
     celebrate({
       body: Joi.object({
@@ -141,6 +143,66 @@ export default (app: Router) => {
       try {
         const systemService = Container.get(SystemService);
         const result = await systemService.notify(req.body);
+        res.send(result);
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.put(
+    '/command-run',
+    celebrate({
+      body: Joi.object({
+        command: Joi.string().required(),
+      }),
+    }),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const systemService = Container.get(SystemService);
+        const uniqPath = await getUniqPath(req.body.command);
+        const logTime = dayjs().format('YYYY-MM-DD-HH-mm-ss-SSS');
+        const logPath = `${uniqPath}/${logTime}.log`;
+        res.setHeader('Content-type', 'application/octet-stream');
+        await systemService.run(
+          { ...req.body, logPath },
+          {
+            onStart: async (cp, startTime) => {
+              res.setHeader('QL-Task-Pid', `${cp.pid}`);
+            },
+            onEnd: async (cp, endTime, diff) => {
+              res.end();
+            },
+            onError: async (message: string) => {
+              res.write(`\n${message}`);
+              const absolutePath = await handleLogPath(logPath);
+              fs.appendFileSync(absolutePath, `\n${message}`);
+            },
+            onLog: async (message: string) => {
+              res.write(`\n${message}`);
+              const absolutePath = await handleLogPath(logPath);
+              fs.appendFileSync(absolutePath, `\n${message}`);
+            },
+          },
+        );
+      } catch (e) {
+        return next(e);
+      }
+    },
+  );
+
+  route.put(
+    '/command-stop',
+    celebrate({
+      body: Joi.object({
+        command: Joi.string().optional(),
+        pid: Joi.number().optional(),
+      }),
+    }),
+    async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const systemService = Container.get(SystemService);
+        const result = await systemService.stop(req.body);
         res.send(result);
       } catch (e) {
         return next(e);

@@ -12,10 +12,11 @@ import {
 import { request } from '@/utils/http';
 import config from '@/utils/config';
 import cron_parser from 'cron-parser';
+import isNil from 'lodash/isNil';
 
 const { Option } = Select;
-const repoUrlRegx = /[^\/\:]+\/[^\/]+(?=\.git)/;
-const fileUrlRegx = /[^\/\:]+\/[^\/]+$/;
+const repoUrlRegx = /([^\/\:]+\/[^\/]+)(?=\.git)/;
+const fileUrlRegx = /([^\/\:]+\/[^\/\.]+)\.[a-z]+$/;
 
 const SubscriptionModal = ({
   subscription,
@@ -99,7 +100,7 @@ const SubscriptionModal = ({
     let _alias = '';
     const _regx = _type === 'file' ? fileUrlRegx : repoUrlRegx;
     if (_regx.test(_url)) {
-      _alias = _url.match(_regx)![0].replaceAll('/', '_').replaceAll('.', '_');
+      _alias = _url.match(_regx)![1].replaceAll('/', '_').replaceAll('.', '_');
     }
     if (_branch) {
       _alias = _alias + '_' + _branch;
@@ -138,6 +139,7 @@ const SubscriptionModal = ({
         setIntervalNumber(value.value);
       }
     }, [value]);
+
     return (
       <Input.Group compact>
         <InputNumber
@@ -230,7 +232,7 @@ const SubscriptionModal = ({
         dependences,
         branch,
         extensions,
-        alias: formatAlias(url, branch),
+        alias: formatAlias(url, branch, _type),
       });
       setType(_type);
     }
@@ -241,7 +243,16 @@ const SubscriptionModal = ({
     if (text.startsWith('ql ')) {
       e.preventDefault();
     }
+    onPaste(e);
   }, []);
+
+  const formatParams = (sub) => {
+    return {
+      ...sub,
+      autoAddCron: isNil(sub?.autoAddCron) ? true : Boolean(sub?.autoAddCron),
+      autoDelCron: isNil(sub?.autoDelCron) ? true : Boolean(sub?.autoDelCron),
+    };
+  };
 
   useEffect(() => {
     if (visible) {
@@ -252,7 +263,9 @@ const SubscriptionModal = ({
   }, [visible]);
 
   useEffect(() => {
-    form.setFieldsValue(subscription || {});
+    form.setFieldsValue(
+      { ...subscription, ...formatParams(subscription) } || {},
+    );
     setType((subscription && subscription.type) || 'public-repo');
     setScheduleType((subscription && subscription.schedule_type) || 'crontab');
     setPullType((subscription && subscription.pull_type) || 'ssh-key');
@@ -282,9 +295,9 @@ const SubscriptionModal = ({
       confirmLoading={loading}
     >
       <Form form={form} name="form_in_modal" layout="vertical">
-        <Form.Item name="name" label="名称">
+        <Form.Item name="name" label="名称" rules={[{ required: true }]}>
           <Input
-            placeholder="支持拷贝ql repo/raw命令，粘贴导入"
+            placeholder="支持拷贝 ql repo/raw 命令，粘贴导入"
             onPaste={onNamePaste}
           />
         </Form.Item>

@@ -37,8 +37,8 @@ export class Subscription {
     this.name = options.name || options.alias;
     this.type = options.type;
     this.schedule = options.schedule;
-    this.status =
-      options.status && SubscriptionStatus[options.status]
+    this.status = this.status =
+      typeof options.status === 'number' && SubscriptionStatus[options.status]
         ? options.status
         : SubscriptionStatus.idle;
     this.url = options.url;
@@ -70,7 +70,7 @@ export enum SubscriptionStatus {
   'queued',
 }
 
-interface SubscriptionInstance
+export interface SubscriptionInstance
   extends Model<Subscription, Subscription>,
     Subscription {}
 export const SubscriptionModel = sequelize.define<SubscriptionInstance>(
