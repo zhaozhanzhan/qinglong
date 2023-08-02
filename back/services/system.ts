@@ -1,7 +1,7 @@
+import { Response } from 'express';
 import { Service, Inject } from 'typedi';
 import winston from 'winston';
 import config from '../config';
-import * as fs from 'fs';
 import {
   AuthDataType,
   AuthInfo,
@@ -20,9 +20,12 @@ import {
   killTask,
   parseContentVersion,
   parseVersion,
+  promiseExec,
 } from '../config/util';
 import { TASK_COMMAND } from '../config/const';
 import taskLimit from '../shared/pLimit';
+import tar from 'tar';
+import path from 'path';
 
 @Service()
 export default class SystemService {
@@ -180,8 +183,8 @@ export default class SystemService {
     return { code: 200 };
   }
 
-  public async reloadSystem() {
-    const cp = spawn('ql -l reload', { shell: '/bin/bash' });
+  public async reloadSystem(target: 'system' | 'data') {
+    const cp = spawn(`ql -l reload ${target || ''}`, { shell: '/bin/bash' });
 
     cp.stdout.on('data', (data) => {
       this.sockService.sendMessage({
@@ -248,6 +251,28 @@ export default class SystemService {
       return { code: 200 };
     } else {
       return { code: 400, message: '任务未找到' };
+    }
+  }
+
+  public async exportData(res: Response) {
+    try {
+      await tar.create(
+        { gzip: true, file: config.dataTgzFile, cwd: config.rootPath },
+        ['data'],
+      );
+      res.download(config.dataTgzFile);
+    } catch (error: any) {
+      return res.send({ code: 400, message: error.message });
+    }
+  }
+
+  public async importData() {
+    try {
+      await promiseExec(`rm -rf ${path.join(config.tmpPath, 'data')}`);
+      await tar.x({ file: config.dataTgzFile, cwd: config.tmpPath });
+      return { code: 200 };
+    } catch (error: any) {
+      return { code: 400, message: error.message };
     }
   }
 }

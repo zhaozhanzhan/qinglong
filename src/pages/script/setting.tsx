@@ -1,3 +1,4 @@
+import intl from 'react-intl-universal';
 import React, { useEffect, useState } from 'react';
 import { Modal, message, Input, Form } from 'antd';
 import { request } from '@/utils/http';
@@ -19,9 +20,7 @@ const SettingModal = ({
     setLoading(true);
     const payload = { ...file, ...values };
     request
-      .post(`${config.apiPrefix}scripts`, {
-        data: payload,
-      })
+      .post(`${config.apiPrefix}scripts`, payload)
       .then(({ code, data }) => {
         if (code === 200) {
           message.success('保存文件成功');
@@ -38,7 +37,7 @@ const SettingModal = ({
 
   return (
     <Modal
-      title="运行设置"
+      title={intl.get('运行设置')}
       open={visible}
       forceRender
       centered
@@ -52,10 +51,10 @@ const SettingModal = ({
       >
         <Form.Item
           name="filename"
-          label="待开发"
-          rules={[{ required: true, message: '待开发' }]}
+          label={intl.get('待开发')}
+          rules={[{ required: true, message: intl.get('待开发') }]}
         >
-          <Input placeholder="待开发" />
+          <Input placeholder={intl.get('待开发')} />
         </Form.Item>
       </Form>
     </Modal>

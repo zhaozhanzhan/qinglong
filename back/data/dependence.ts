@@ -18,7 +18,7 @@ export class Dependence {
         : DependenceStatus.queued;
     this.type = options.type || DependenceTypes.nodejs;
     this.timestamp = new Date().toString();
-    this.name = options.name;
+    this.name = options.name.trim();
     this.log = options.log || [];
     this.remark = options.remark || '';
   }
@@ -43,13 +43,13 @@ export enum DependenceTypes {
 export enum InstallDependenceCommandTypes {
   'pnpm add -g',
   'pip3 install --disable-pip-version-check --root-user-action=ignore',
-  'apk add',
+  'apk add --no-check-certificate',
 }
 
 export enum GetDependenceCommandTypes {
   'pnpm ls -g ',
-  'pip3 list --disable-pip-version-check',
-  'apk info',
+  'pip3 show --disable-pip-version-check',
+  'apk info -es',
 }
 
 export enum versionDependenceCommandTypes {
@@ -66,7 +66,7 @@ export enum unInstallDependenceCommandTypes {
 
 export interface DependenceInstance
   extends Model<Dependence, Dependence>,
-  Dependence { }
+    Dependence {}
 export const DependenceModel = sequelize.define<DependenceInstance>(
   'Dependence',
   {

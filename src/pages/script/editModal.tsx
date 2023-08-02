@@ -1,3 +1,4 @@
+import intl from 'react-intl-universal';
 import React, { useEffect, useState, useRef } from 'react';
 import { Drawer, Button, Tabs, Badge, Select, TreeSelect } from 'antd';
 import { request } from '@/utils/http';
@@ -86,11 +87,9 @@ const EditModal = ({
     const content = editorRef.current.getValue().replace(/\r\n/g, '\n');
     request
       .put(`${config.apiPrefix}scripts/run`, {
-        data: {
-          filename: cNode.title,
-          path: cNode.parent || '',
-          content,
-        },
+        filename: cNode.title,
+        path: cNode.parent || '',
+        content,
       })
       .then(({ code, data }) => {
         if (code === 200) {
@@ -106,11 +105,9 @@ const EditModal = ({
     }
     request
       .put(`${config.apiPrefix}scripts/stop`, {
-        data: {
-          filename: cNode.title,
-          path: cNode.parent || '',
-          pid: currentPid,
-        },
+        filename: cNode.title,
+        path: cNode.parent || '',
+        pid: currentPid,
       })
       .then(({ code, data }) => {
         if (code === 200) {
@@ -165,7 +162,7 @@ const EditModal = ({
             value={selectedKey}
             dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
             treeData={treeData}
-            placeholder="请选择脚本文件"
+            placeholder={intl.get('请选择脚本文件')}
             fieldNames={{ value: 'key', label: 'title' }}
             showSearch
             onSelect={onSelect}
@@ -187,7 +184,7 @@ const EditModal = ({
             style={{ marginRight: 8 }}
             onClick={isRunning ? stop : run}
           >
-            {isRunning ? '停止' : '运行'}
+            {isRunning ? intl.get('停止') : intl.get('运行')}
           </Button>
           <Button
             type="primary"
@@ -196,17 +193,17 @@ const EditModal = ({
               setLog('');
             }}
           >
-            清空日志
+            {intl.get('清空日志')}
           </Button>
-          <Button
+          {/* <Button
             type="primary"
             style={{ marginRight: 8 }}
             onClick={() => {
               setSettingModalVisible(true);
             }}
           >
-            设置
-          </Button>
+            {intl.get('设置')}
+          </Button> */}
           <Button
             type="primary"
             style={{ marginRight: 8 }}
@@ -214,7 +211,7 @@ const EditModal = ({
               setSaveModalVisible(true);
             }}
           >
-            保存
+            {intl.get('保存')}
           </Button>
           <Button
             type="primary"
@@ -224,7 +221,7 @@ const EditModal = ({
               handleCancel();
             }}
           >
-            退出
+            {intl.get('退出')}
           </Button>
         </>
       }

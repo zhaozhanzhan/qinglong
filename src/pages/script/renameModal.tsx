@@ -1,3 +1,4 @@
+import intl from 'react-intl-universal';
 import React, { useEffect, useState } from 'react';
 import { Modal, message, Input, Form } from 'antd';
 import { request } from '@/utils/http';
@@ -21,11 +22,9 @@ const RenameModal = ({
       const { code, data } = await request.put(
         `${config.apiPrefix}scripts/rename`,
         {
-          data: {
-            filename: currentNode.title,
-            path: currentNode.parent || '',
-            newFilename: values.name,
-          },
+          filename: currentNode.title,
+          path: currentNode.parent || '',
+          newFilename: values.name,
         },
       );
 
@@ -45,7 +44,7 @@ const RenameModal = ({
 
   return (
     <Modal
-      title="重命名"
+      title={intl.get('重命名')}
       open={visible}
       forceRender
       centered
@@ -66,9 +65,9 @@ const RenameModal = ({
       <Form form={form} layout="vertical" name="edit_name_modal">
         <Form.Item
           name="name"
-          rules={[{ required: true, message: '请输入新名称' }]}
+          rules={[{ required: true, message: intl.get('请输入新名称') }]}
         >
-          <Input placeholder="请输入新名称" />
+          <Input placeholder={intl.get('请输入新名称')} />
         </Form.Item>
       </Form>
     </Modal>

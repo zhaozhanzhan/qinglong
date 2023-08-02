@@ -1,3 +1,4 @@
+import intl from 'react-intl-universal';
 import React, { useEffect, useRef, useState } from 'react';
 import { Modal, message, Input, Form, Statistic, Button } from 'antd';
 import { request } from '@/utils/http';
@@ -44,12 +45,9 @@ const CronLogModal = ({
           data !== value
         ) {
           const log = data as string;
-          setValue(log || '暂无日志');
+          setValue(log || intl.get('暂无日志'));
           const hasNext = Boolean(
-            log &&
-              !logEnded(log) &&
-              !log.includes('重启面板') &&
-              !log.includes('任务未运行'),
+            log && !logEnded(log) && !log.includes('任务未运行'),
           );
           setExecuting(hasNext);
           autoScroll();
@@ -57,29 +55,6 @@ const CronLogModal = ({
             setTimeout(() => {
               getCronLog();
             }, 2000);
-          }
-          if (
-            log &&
-            log.includes('重启面板') &&
-            cron.status === CrontabStatus.running
-          ) {
-            message.warning({
-              content: (
-                <span>
-                  系统将在
-                  <Countdown
-                    className="inline-countdown"
-                    format="ss"
-                    value={Date.now() + 1000 * 30}
-                  />
-                  秒后自动刷新
-                </span>
-              ),
-              duration: 10,
-            });
-            setTimeout(() => {
-              window.location.reload();
-            }, 30000);
           }
         }
       })
@@ -157,7 +132,7 @@ const CronLogModal = ({
       onCancel={() => cancel()}
       footer={[
         <Button type="primary" onClick={() => cancel()}>
-          知道了
+          {intl.get('知道了')}
         </Button>,
       ]}
     >
