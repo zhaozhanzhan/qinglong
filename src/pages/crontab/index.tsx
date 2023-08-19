@@ -68,8 +68,8 @@ const Crontab = () => {
       title: intl.get('名称'),
       dataIndex: 'name',
       key: 'name',
-      fixed: isPhone ? undefined : 'left',
-      width: 120,
+      fixed: 'left',
+      width: 140,
       render: (text: string, record: any) => (
         <>
           <a
@@ -124,7 +124,7 @@ const Crontab = () => {
       title: intl.get('命令/脚本'),
       dataIndex: 'command',
       key: 'command',
-      width: 200,
+      width: 220,
       render: (text, record) => {
         return (
           <Paragraph
@@ -214,7 +214,7 @@ const Crontab = () => {
     },
     {
       title: intl.get('最后运行时长'),
-      width: 180,
+      width: 167,
       dataIndex: 'last_running_time',
       key: 'last_running_time',
       sorter: {
@@ -232,7 +232,7 @@ const Crontab = () => {
       title: intl.get('最后运行时间'),
       dataIndex: 'last_execution_time',
       key: 'last_execution_time',
-      width: 150,
+      width: 141,
       sorter: {
         compare: (a, b) => {
           return (a.last_execution_time || 0) - (b.last_execution_time || 0);
@@ -259,7 +259,7 @@ const Crontab = () => {
     },
     {
       title: intl.get('下次运行时间'),
-      width: 150,
+      width: 144,
       sorter: {
         compare: (a: any, b: any) => {
           return a.nextRunTime - b.nextRunTime;
@@ -276,7 +276,7 @@ const Crontab = () => {
     },
     {
       title: intl.get('关联订阅'),
-      width: 190,
+      width: 185,
       render: (text, record: any) =>
         record.sub_id ? (
           <Name
@@ -292,46 +292,40 @@ const Crontab = () => {
     {
       title: intl.get('操作'),
       key: 'action',
-      width: 130,
+      width: 140,
       fixed: isPhone ? undefined : 'right',
       render: (text, record, index) => {
         const isPc = !isPhone;
         return (
           <Space size="middle">
             {record.status === CrontabStatus.idle && (
-              <Tooltip title={isPc ? intl.get('运行') : ''}>
-                <a
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    runCron(record, index);
-                  }}
-                >
-                  <PlayCircleOutlined />
-                </a>
-              </Tooltip>
-            )}
-            {record.status !== CrontabStatus.idle && (
-              <Tooltip title={isPc ? intl.get('停止') : ''}>
-                <a
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    stopCron(record, index);
-                  }}
-                >
-                  <PauseCircleOutlined />
-                </a>
-              </Tooltip>
-            )}
-            <Tooltip title={isPc ? intl.get('日志') : ''}>
               <a
                 onClick={(e) => {
                   e.stopPropagation();
-                  setLogCron({ ...record, timestamp: Date.now() });
+                  runCron(record, index);
                 }}
               >
-                <FileTextOutlined />
+                {intl.get('运行')}
               </a>
-            </Tooltip>
+            )}
+            {record.status !== CrontabStatus.idle && (
+              <a
+                onClick={(e) => {
+                  e.stopPropagation();
+                  stopCron(record, index);
+                }}
+              >
+                {intl.get('停止')}
+              </a>
+            )}
+            <a
+              onClick={(e) => {
+                e.stopPropagation();
+                setLogCron({ ...record, timestamp: Date.now() });
+              }}
+            >
+              {intl.get('日志')}
+            </a>
             <MoreBtn key="more" record={record} index={index} />
           </Space>
         );
@@ -447,7 +441,7 @@ const Crontab = () => {
           .delete(`${config.apiPrefix}crons`, { data: [record.id] })
           .then(({ code, data }) => {
             if (code === 200) {
-              message.success('删除成功');
+              message.success(intl.get('删除成功'));
               const result = [...value];
               const i = result.findIndex((x) => x.id === record.id);
               if (i !== -1) {
@@ -729,7 +723,7 @@ const Crontab = () => {
           .delete(`${config.apiPrefix}crons`, { data: selectedRowIds })
           .then(({ code, data }) => {
             if (code === 200) {
-              message.success('批量删除成功');
+              message.success(intl.get('批量删除成功'));
               setSelectedRowIds([]);
               getCrons();
             }
@@ -905,6 +899,11 @@ const Crontab = () => {
     setViewConf(view ? view : null);
   };
 
+  const [vt] = useVT(
+    () => ({ scroll: { y: tableScrollHeight } }),
+    [tableScrollHeight],
+  );
+
   return (
     <PageContainer
       className="ql-container-wrapper crontab-wrapper ql-container-wrapper-has-tab"
@@ -1036,11 +1035,12 @@ const Crontab = () => {
           dataSource={value}
           rowKey="id"
           size="middle"
-          scroll={{ x: 1000, y: tableScrollHeight }}
+          scroll={{ x: 1200, y: tableScrollHeight }}
           loading={loading}
           rowSelection={rowSelection}
           rowClassName={getRowClassName}
           onChange={onPageChange}
+          components={isPhone || pageConf.size < 50 ? undefined : vt}
         />
       </div>
       <CronLogModal

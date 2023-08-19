@@ -23,7 +23,7 @@ const SubscriptionLogModal = ({
   data?: string;
   logUrl?: string;
 }) => {
-  const [value, setValue] = useState<string>('启动中...');
+  const [value, setValue] = useState<string>(intl.get('启动中...'));
   const [loading, setLoading] = useState<any>(true);
   const [executing, setExecuting] = useState<any>(true);
   const [isPhone, setIsPhone] = useState(false);
@@ -99,9 +99,6 @@ const SubscriptionLogModal = ({
       open={visible}
       centered
       className="log-modal"
-      bodyStyle={{
-        minHeight: '300px',
-      }}
       forceRender
       onOk={() => cancel()}
       onCancel={() => cancel()}
@@ -119,7 +116,6 @@ const SubscriptionLogModal = ({
             isPhone
               ? {
                   fontFamily: 'Source Code Pro',
-                  width: 375,
                   zoom: 0.83,
                 }
               : {}
