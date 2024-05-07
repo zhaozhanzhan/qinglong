@@ -1,5 +1,5 @@
 import intl from 'react-intl-universal';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Button,
   InputNumber,
@@ -32,6 +32,9 @@ import About from './about';
 import { useOutletContext } from '@umijs/max';
 import { SharedContext } from '@/layouts';
 import './index.less';
+import useResizeObserver from '@react-hook/resize-observer';
+import SystemLog from './systemLog';
+import Dependence from './dependence';
 
 const { Text } = Typography;
 const isDemoEnv = window.__ENV__DeployEnv === 'demo';
@@ -41,9 +44,9 @@ const Setting = () => {
     headerStyle,
     isPhone,
     user,
+    theme,
     reloadUser,
     reloadTheme,
-    socketMessage,
     systemInfo,
   } = useOutletContext<SharedContext>();
   const columns = [
@@ -72,11 +75,19 @@ const Setting = () => {
       title: intl.get('权限'),
       dataIndex: 'scopes',
       key: 'scopes',
-      width: '40%',
+      width: 500,
       render: (text: string, record: any) => {
-        return record.scopes.map((scope: any) => {
-          return <Tag key={scope}>{(config.scopesMap as any)[scope]}</Tag>;
-        });
+        return (
+          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+            {record.scopes.map((scope: any) => {
+              return (
+                <Tag style={{ marginRight: 0 }} key={scope}>
+                  {(config.scopesMap as any)[scope]}
+                </Tag>
+              );
+            })}
+          </div>
+        );
       },
     },
     {
@@ -113,7 +124,17 @@ const Setting = () => {
   const [editedApp, setEditedApp] = useState<any>();
   const [tabActiveKey, setTabActiveKey] = useState('security');
   const [loginLogData, setLoginLogData] = useState<any[]>([]);
+  const [systemLogData, setSystemLogData] = useState<string>('');
   const [notificationInfo, setNotificationInfo] = useState<any>();
+  const containergRef = useRef<HTMLDivElement>(null);
+  const [height, setHeight] = useState<number>(0);
+
+  useResizeObserver(containergRef, (entry) => {
+    const _height = entry.target.parentElement?.parentElement?.offsetHeight;
+    if (_height && height !== _height - 66) {
+      setHeight(_height - 66);
+    }
+  });
 
   const getApps = () => {
     setLoading(true);
@@ -232,6 +253,19 @@ const Setting = () => {
       });
   };
 
+  const getSystemLog = () => {
+    request
+      .get<Blob>(`${config.apiPrefix}system/log`, {
+        responseType: 'blob',
+      })
+      .then(async (res) => {
+        setSystemLogData(await res.text());
+      })
+      .catch((error: any) => {
+        console.log(error);
+      });
+  };
+
   const tabChange = (activeKey: string) => {
     setTabActiveKey(activeKey);
     if (activeKey === 'app') {
@@ -240,6 +274,8 @@ const Setting = () => {
       getLoginLog();
     } else if (activeKey === 'notification') {
       getNotification();
+    } else if (activeKey === 'syslog') {
+      getSystemLog();
     }
   };
 
@@ -279,66 +315,76 @@ const Setting = () => {
           : []
       }
     >
-      <Tabs
-        defaultActiveKey="security"
-        size="small"
-        tabPosition="top"
-        onChange={tabChange}
-        items={[
-          ...(!isDemoEnv
-            ? [
-                {
-                  key: 'security',
-                  label: intl.get('安全设置'),
-                  children: (
-                    <SecuritySettings user={user} userChange={reloadUser} />
-                  ),
-                },
-              ]
-            : []),
-          {
-            key: 'app',
-            label: intl.get('应用设置'),
-            children: (
-              <Table
-                columns={columns}
-                pagination={false}
-                dataSource={dataSource}
-                rowKey="id"
-                size="middle"
-                scroll={{ x: 768 }}
-                loading={loading}
-              />
-            ),
-          },
-          {
-            key: 'notification',
-            label: intl.get('通知设置'),
-            children: <NotificationSetting data={notificationInfo} />,
-          },
-          {
-            key: 'login',
-            label: intl.get('登录日志'),
-            children: <LoginLog data={loginLogData} />,
-          },
-          {
-            key: 'other',
-            label: intl.get('其他设置'),
-            children: (
-              <Other
-                reloadTheme={reloadTheme}
-                socketMessage={socketMessage}
-                systemInfo={systemInfo}
-              />
-            ),
-          },
-          {
-            key: 'about',
-            label: intl.get('关于'),
-            children: <About systemInfo={systemInfo} />,
-          },
-        ]}
-      ></Tabs>
+      <div ref={containergRef}>
+        <Tabs
+          defaultActiveKey="security"
+          size="small"
+          tabPosition="top"
+          onChange={tabChange}
+          items={[
+            ...(!isDemoEnv
+              ? [
+                  {
+                    key: 'security',
+                    label: intl.get('安全设置'),
+                    children: (
+                      <SecuritySettings user={user} userChange={reloadUser} />
+                    ),
+                  },
+                ]
+              : []),
+            {
+              key: 'app',
+              label: intl.get('应用设置'),
+              children: (
+                <Table
+                  columns={columns}
+                  pagination={false}
+                  dataSource={dataSource}
+                  rowKey="id"
+                  size="middle"
+                  scroll={{ x: 1000 }}
+                  loading={loading}
+                />
+              ),
+            },
+            {
+              key: 'notification',
+              label: intl.get('通知设置'),
+              children: <NotificationSetting data={notificationInfo} />,
+            },
+            {
+              key: 'syslog',
+              label: intl.get('系统日志'),
+              children: (
+                <SystemLog data={systemLogData} height={height} theme={theme} />
+              ),
+            },
+            {
+              key: 'login',
+              label: intl.get('登录日志'),
+              children: <LoginLog data={loginLogData} />,
+            },
+            {
+              key: 'dependence',
+              label: intl.get('依赖设置'),
+              children: <Dependence />,
+            },
+            {
+              key: 'other',
+              label: intl.get('其他设置'),
+              children: (
+                <Other reloadTheme={reloadTheme} systemInfo={systemInfo} />
+              ),
+            },
+            {
+              key: 'about',
+              label: intl.get('关于'),
+              children: <About systemInfo={systemInfo} />,
+            },
+          ]}
+        ></Tabs>
+      </div>
       <AppModal
         visible={isModalVisible}
         handleCancel={handleCancel}

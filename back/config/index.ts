@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 import path from 'path';
-import { createRandomString } from './util';
+import { createRandomString } from './share';
 
 process.env.NODE_ENV = process.env.NODE_ENV || 'development';
 
@@ -30,6 +30,7 @@ const logPath = path.join(dataPath, 'log/');
 const dbPath = path.join(dataPath, 'db/');
 const uploadPath = path.join(dataPath, 'upload/');
 const sshdPath = path.join(dataPath, 'ssh.d/');
+const systemLogPath = path.join(dataPath, 'syslog/');
 
 const envFile = path.join(configPath, 'env.sh');
 const confFile = path.join(configPath, 'config.sh');
@@ -46,6 +47,7 @@ const configString = 'config sample crontab shareCode diy';
 const versionFile = path.join(rootPath, 'version.yaml');
 const dataTgzFile = path.join(tmpPath, 'data.tgz');
 const shareShellFile = path.join(shellPath, 'share.sh');
+const dependenceProxyFile = path.join(configPath, 'dependence-proxy.sh');
 
 if (envFound.error) {
   throw new Error("⚠️  Couldn't find .env file  ⚠️");
@@ -55,6 +57,7 @@ export default {
   port: parseInt(process.env.BACK_PORT as string, 10),
   cronPort: parseInt(process.env.CRON_PORT as string, 10),
   publicPort: parseInt(process.env.PUBLIC_PORT as string, 10),
+  updatePort: parseInt(process.env.UPDATE_PORT as string, 10),
   secret: process.env.SECRET || createRandomString(16, 32),
   logs: {
     level: process.env.LOG_LEVEL || 'silly',
@@ -67,6 +70,7 @@ export default {
   dataPath,
   dataTgzFile,
   shareShellFile,
+  dependenceProxyFile,
   configString,
   loginFaild,
   authError,
@@ -88,6 +92,7 @@ export default {
     'config.sh.sample',
     'cookie.sh',
     'crontab.list',
+    'dependence-proxy.sh',
     'env.sh',
     'token.json',
   ],
@@ -110,4 +115,5 @@ export default {
   lastVersionFile,
   sqliteFile,
   sshdPath,
+  systemLogPath,
 };

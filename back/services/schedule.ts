@@ -12,7 +12,7 @@ import dayjs from 'dayjs';
 import taskLimit from '../shared/pLimit';
 import { spawn } from 'cross-spawn';
 
-interface ScheduleTaskType {
+export interface ScheduleTaskType {
   id: number;
   command: string;
   name?: string;
@@ -42,15 +42,22 @@ export default class ScheduleService {
 
   private maxBuffer = 200 * 1024 * 1024;
 
-  constructor(@Inject('logger') private logger: winston.Logger) {}
+  constructor(@Inject('logger') private logger: winston.Logger) { }
 
   async runTask(
     command: string,
     callbacks: TaskCallbacks = {},
+    params: {
+      schedule?: string;
+      name?: string;
+      command?: string;
+    },
     completionTime: 'start' | 'end' = 'end',
   ) {
-    return taskLimit.runWithCpuLimit(() => {
+    return taskLimit.runWithCronLimit(() => {
       return new Promise(async (resolve, reject) => {
+        this.logger.info(`[panel][开始执行任务] 参数 ${JSON.stringify({ ...params, command })}`);
+
         try {
           const startTime = dayjs();
           await callbacks.onBefore?.(startTime);
@@ -66,9 +73,8 @@ export default class ScheduleService {
 
           cp.stderr.on('data', async (data) => {
             this.logger.info(
-              '[执行任务失败] %s，时间：%s, 错误信息：%j',
+              '[panel][执行任务失败] 命令: %s, 错误信息: %j',
               command,
-              new Date().toLocaleString(),
               data.toString(),
             );
             await callbacks.onError?.(data.toString());
@@ -76,34 +82,26 @@ export default class ScheduleService {
 
           cp.on('error', async (err) => {
             this.logger.error(
-              '[创建任务失败] %s，时间：%s, 错误信息：%j',
+              '[panel][创建任务失败] 命令: %s, 错误信息: %j',
               command,
-              new Date().toLocaleString(),
               err,
             );
             await callbacks.onError?.(JSON.stringify(err));
           });
 
-          cp.on('exit', async (code, signal) => {
-            this.logger.info(
-              `[任务退出] ${command} 进程id: ${cp.pid}，退出码 ${code}`,
-            );
-          });
-
-          cp.on('close', async (code) => {
+          cp.on('exit', async (code) => {
             const endTime = dayjs();
             await callbacks.onEnd?.(
               cp,
               endTime,
               endTime.diff(startTime, 'seconds'),
             );
-            resolve(null);
+            resolve({ ...params, pid: cp.pid, code });
           });
         } catch (error) {
-          await this.logger.error(
-            '执行任务%s失败，时间：%s, 错误信息：%j',
+          this.logger.error(
+            '[panel][执行任务失败] 命令: %s, 错误信息: %j',
             command,
-            new Date().toLocaleString(),
             error,
           );
           await callbacks.onError?.(JSON.stringify(error));
@@ -119,7 +117,7 @@ export default class ScheduleService {
   ) {
     const _id = this.formatId(id);
     this.logger.info(
-      '[创建cron任务]，任务ID: %s，cron: %s，任务名: %s，执行命令: %s',
+      '[panel][创建cron任务], 任务ID: %s, cron: %s, 任务名: %s, 执行命令: %s',
       _id,
       schedule,
       name,
@@ -129,18 +127,26 @@ export default class ScheduleService {
     this.scheduleStacks.set(
       _id,
       nodeSchedule.scheduleJob(_id, schedule, async () => {
-        this.runTask(command, callbacks);
+        this.runTask(command, callbacks, {
+          name,
+          schedule,
+          command,
+        });
       }),
     );
 
     if (runImmediately) {
-      this.runTask(command, callbacks);
+      this.runTask(command, callbacks, {
+        name,
+        schedule,
+        command,
+      });
     }
   }
 
   async cancelCronTask({ id = 0, name }: ScheduleTaskType) {
     const _id = this.formatId(id);
-    this.logger.info('[取消定时任务]，任务名：%s', name);
+    this.logger.info('[panel][取消定时任务], 任务名: %s', name);
     if (this.scheduleStacks.has(_id)) {
       this.scheduleStacks.get(_id)?.cancel();
       this.scheduleStacks.delete(_id);
@@ -155,7 +161,7 @@ export default class ScheduleService {
   ) {
     const _id = this.formatId(id);
     this.logger.info(
-      '[创建interval任务]，任务ID: %s，任务名: %s，执行命令: %s',
+      '[panel][创建interval任务], 任务ID: %s, 任务名: %s, 执行命令: %s',
       _id,
       name,
       command,
@@ -163,13 +169,15 @@ export default class ScheduleService {
     const task = new Task(
       name,
       () => {
-        this.runTask(command, callbacks);
+        this.runTask(command, callbacks, {
+          name,
+          command,
+        });
       },
       (err) => {
         this.logger.error(
-          '执行任务%s失败，时间：%s, 错误信息：%j',
+          '[执行任务失败] 命令: %s, 错误信息: %j',
           command,
-          new Date().toLocaleString(),
           err,
         );
       },
@@ -184,13 +192,16 @@ export default class ScheduleService {
     this.intervalSchedule.addIntervalJob(job);
 
     if (runImmediately) {
-      this.runTask(command, callbacks);
+      this.runTask(command, callbacks, {
+        name,
+        command,
+      });
     }
   }
 
   async cancelIntervalTask({ id = 0, name }: ScheduleTaskType) {
     const _id = this.formatId(id);
-    this.logger.info('[取消interval任务]，任务ID: %s，任务名：%s', _id, name);
+    this.logger.info('[取消interval任务], 任务ID: %s, 任务名: %s', _id, name);
     this.intervalSchedule.removeById(_id);
   }
 

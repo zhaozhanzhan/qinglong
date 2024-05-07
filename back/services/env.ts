@@ -1,7 +1,7 @@
 import { Service, Inject } from 'typedi';
 import winston from 'winston';
 import config from '../config';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import {
   Env,
   EnvModel,
@@ -202,14 +202,12 @@ export default class EnvService {
           let value = group
             .map((x) => x.value)
             .join('&')
-            .replace(/(\\)[^n]/g, '\\\\')
-            .replace(/(\\$)/, '\\\\')
-            .replace(/"/g, '\\"')
+            .replace(/'/g, "'\\''")
             .trim();
-          env_string += `export ${key}="${value}"\n`;
+          env_string += `export ${key}='${value}'\n`;
         }
       }
     }
-    fs.writeFileSync(config.envFile, env_string);
+    await fs.writeFile(config.envFile, env_string);
   }
 }

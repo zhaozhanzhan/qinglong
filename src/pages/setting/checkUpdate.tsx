@@ -1,12 +1,15 @@
-import intl from 'react-intl-universal';
-import React, { useEffect, useState, useRef } from 'react';
-import { Statistic, Modal, Tag, Button, Spin, message } from 'antd';
-import { request } from '@/utils/http';
+import { disableBody } from '@/utils';
 import config from '@/utils/config';
+import { request } from '@/utils/http';
+import WebSocketManager from '@/utils/websocket';
+import Ansi from 'ansi-to-react';
+import { Button, Modal, Statistic, message } from 'antd';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import intl from 'react-intl-universal';
 
 const { Countdown } = Statistic;
 
-const CheckUpdate = ({ socketMessage, systemInfo }: any) => {
+const CheckUpdate = ({ systemInfo }: any) => {
   const [updateLoading, setUpdateLoading] = useState(false);
   const [value, setValue] = useState('');
   const modalRef = useRef<any>();
@@ -76,13 +79,8 @@ const CheckUpdate = ({ socketMessage, systemInfo }: any) => {
         </>
       ),
       content: (
-        <pre
-          style={{
-            fontSize: 12,
-            fontWeight: 400,
-          }}
-        >
-          {lastLog}
+        <pre>
+          <Ansi>{lastLog}</Ansi>
         </pre>
       ),
       okText: intl.get('下载更新'),
@@ -110,16 +108,39 @@ const CheckUpdate = ({ socketMessage, systemInfo }: any) => {
       title: intl.get('下载更新中...'),
       centered: true,
       content: (
-        <pre
-          style={{
-            fontSize: 12,
-            fontWeight: 400,
-          }}
-        >
-          {value}
+        <pre>
+          <Ansi>{value}</Ansi>
         </pre>
       ),
     });
+  };
+
+  const reloadSystem = (type?: string) => {
+    request
+      .put(`${config.apiPrefix}update/${type}`)
+      .then((_data: any) => {
+        message.success({
+          content: (
+            <span>
+              {intl.get('系统将在')}
+              <Countdown
+                className="inline-countdown"
+                format="ss"
+                value={Date.now() + 1000 * 30}
+              />
+              {intl.get('秒后自动刷新')}
+            </span>
+          ),
+          duration: 30,
+        });
+        disableBody();
+        setTimeout(() => {
+          window.location.reload();
+        }, 30000);
+      })
+      .catch((error: any) => {
+        console.log(error);
+      });
   };
 
   const showReloadModal = () => {
@@ -131,30 +152,7 @@ const CheckUpdate = ({ socketMessage, systemInfo }: any) => {
       content: intl.get('系统安装包下载成功，确认重启'),
       okText: intl.get('重启'),
       onOk() {
-        request
-          .put(`${config.apiPrefix}system/reload`, { type: 'system' })
-          .then((_data: any) => {
-            message.success({
-              content: (
-                <span>
-                  {intl.get('系统将在')}
-                  <Countdown
-                    className="inline-countdown"
-                    format="ss"
-                    value={Date.now() + 1000 * 30}
-                  />
-                  {intl.get('秒后自动刷新')}
-                </span>
-              ),
-              duration: 30,
-            });
-            setTimeout(() => {
-              window.location.reload();
-            }, 30000);
-          })
-          .catch((error: any) => {
-            console.log(error);
-          });
+        reloadSystem('system');
       },
       onCancel() {
         modalRef.current.update({
@@ -167,17 +165,8 @@ const CheckUpdate = ({ socketMessage, systemInfo }: any) => {
   };
 
   useEffect(() => {
-    if (!modalRef.current || !socketMessage) {
-      return;
-    }
-    const { type, message: _message, references } = socketMessage;
-
-    if (type !== 'updateSystemVersion') {
-      return;
-    }
-
-    const newMessage = `${value}${_message}`;
-    const updateFailed = newMessage.includes(intl.get('失败'));
+    if (!value) return;
+    const updateFailed = value.includes('失败，请检查');
 
     modalRef.current.update({
       maskClosable: updateFailed,
@@ -185,41 +174,58 @@ const CheckUpdate = ({ socketMessage, systemInfo }: any) => {
       okButtonProps: { disabled: !updateFailed },
       content: (
         <>
-          <pre
-            style={{
-              fontSize: 12,
-              fontWeight: 400,
-            }}
-          >
-            {newMessage}
+          <pre>
+            <Ansi>{value}</Ansi>
           </pre>
           <div id="log-identifier" style={{ paddingBottom: 5 }}></div>
         </>
       ),
     });
+  }, [value]);
 
-    if (updateFailed && !value.includes(intl.get('失败，请检查'))) {
+  const handleMessage = useCallback((payload: any) => {
+    let { message: _message } = payload;
+    const updateFailed = _message.includes('失败，请检查');
+
+    if (updateFailed) {
       message.error(intl.get('更新失败，请检查网络及日志或稍后再试'));
     }
 
-    setValue(newMessage);
-
-    document.getElementById('log-identifier') &&
+    setTimeout(() => {
       document
-        .getElementById('log-identifier')!
-        .scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        .querySelector('#log-identifier')!
+        .scrollIntoView({ behavior: 'smooth' });
+    }, 600);
 
-    if (_message.includes(intl.get('更新包下载成功'))) {
+    if (_message.includes('更新包下载成功')) {
       setTimeout(() => {
         showReloadModal();
       }, 1000);
     }
-  }, [socketMessage]);
+
+    setValue((p) => `${p}${_message}`);
+  }, []);
+
+  useEffect(() => {
+    const ws = WebSocketManager.getInstance();
+    ws.subscribe('updateSystemVersion', handleMessage);
+
+    return () => {
+      ws.unsubscribe('updateSystemVersion', handleMessage);
+    };
+  }, []);
 
   return (
     <>
       <Button type="primary" onClick={checkUpgrade}>
         {intl.get('检查更新')}
+      </Button>
+      <Button
+        type="primary"
+        onClick={() => reloadSystem('reload')}
+        style={{ marginLeft: 8 }}
+      >
+        {intl.get('重新启动')}
       </Button>
     </>
   );

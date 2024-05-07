@@ -1,13 +1,13 @@
 import * as Sentry from '@sentry/react';
-import { Integrations } from '@sentry/tracing';
 import { loader } from '@monaco-editor/react';
+import config from './config';
 
 export function init(version: string) {
   // sentry监控 init
   Sentry.init({
-    dsn: 'https://3406424fb1dc4813a62d39e844a9d0ac@o1098464.ingest.sentry.io/6122818',
+    dsn: 'https://49b9ad1a6201bfe027db296ab7c6d672@o1098464.ingest.sentry.io/6122818',
     integrations: [
-      new Integrations.BrowserTracing({
+      new Sentry.BrowserTracing({
         shouldCreateSpanForRequest(url) {
           return !url.includes('/api/ws') && !url.includes('/api/static');
         },
@@ -27,7 +27,7 @@ export function init(version: string) {
   // monaco 编辑器配置cdn和locale
   loader.config({
     paths: {
-      vs: 'https://cdn.staticfile.org/monaco-editor/0.33.0/min/vs',
+      vs: `${config.baseUrl}monaco-editor/min/vs`,
     },
     'vs/nls': {
       availableLanguages: {

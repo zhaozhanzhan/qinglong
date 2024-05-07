@@ -3,24 +3,32 @@ import winston from 'winston';
 import config from '../config';
 import { Crontab, CrontabModel, CrontabStatus } from '../data/cron';
 import { exec, execSync } from 'child_process';
-import fs from 'fs';
+import fs from 'fs/promises';
 import cron_parser from 'cron-parser';
-import { getFileContentByName, fileExist, killTask } from '../config/util';
-import { promises, existsSync } from 'fs';
+import {
+  getFileContentByName,
+  fileExist,
+  killTask,
+  getUniqPath,
+  safeJSONParse,
+} from '../config/util';
 import { Op, where, col as colFn, FindOptions, fn } from 'sequelize';
 import path from 'path';
 import { TASK_PREFIX, QL_PREFIX } from '../config/const';
 import cronClient from '../schedule/client';
 import taskLimit from '../shared/pLimit';
 import { spawn } from 'cross-spawn';
+import dayjs from 'dayjs';
+import pickBy from 'lodash/pickBy';
+import omit from 'lodash/omit';
 
 @Service()
 export default class CronService {
   constructor(@Inject('logger') private logger: winston.Logger) {}
 
-  private isSixCron(cron: Crontab) {
-    const { schedule } = cron;
-    if (Number(schedule?.split(/ +/).length) > 5) {
+  private isNodeCron(cron: Crontab) {
+    const { schedule, extra_schedules } = cron;
+    if (Number(schedule?.split(/ +/).length) > 5 || extra_schedules?.length) {
       return true;
     }
     return false;
@@ -30,9 +38,15 @@ export default class CronService {
     const tab = new Crontab(payload);
     tab.saved = false;
     const doc = await this.insert(tab);
-    if (this.isSixCron(doc)) {
+    if (this.isNodeCron(doc)) {
       await cronClient.addCron([
-        { id: String(doc.id), schedule: doc.schedule!, command: doc.command },
+        {
+          name: doc.name || '',
+          id: String(doc.id),
+          schedule: doc.schedule!,
+          command: this.makeCommand(doc),
+          extraSchedules: doc.extra_schedules || [],
+        },
       ]);
     }
     await this.set_crontab();
@@ -51,15 +65,17 @@ export default class CronService {
     if (doc.isDisabled === 1) {
       return newDoc;
     }
-    if (this.isSixCron(doc)) {
-      await cronClient.delCron([String(newDoc.id)]);
+    if (this.isNodeCron(doc)) {
+      await cronClient.delCron([String(doc.id)]);
     }
-    if (this.isSixCron(newDoc)) {
+    if (this.isNodeCron(newDoc)) {
       await cronClient.addCron([
         {
+          name: doc.name || '',
           id: String(newDoc.id),
           schedule: newDoc.schedule!,
-          command: newDoc.command,
+          command: this.makeCommand(newDoc),
+          extraSchedules: newDoc.extra_schedules || [],
         },
       ]);
     }
@@ -87,7 +103,7 @@ export default class CronService {
     last_running_time: number;
     last_execution_time: number;
   }) {
-    const options: any = {
+    let options: any = {
       status,
       pid,
       log_path,
@@ -97,7 +113,16 @@ export default class CronService {
       options.last_running_time = last_running_time;
     }
 
-    return await CrontabModel.update({ ...options }, { where: { id: ids } });
+    for (const id of ids) {
+      const cron = await this.getDb({ id });
+      if (status === CrontabStatus.idle && log_path !== cron.log_path) {
+        options = omit(options, ['status', 'log_path', 'pid']);
+      }
+      await CrontabModel.update(
+        { ...pickBy(options, (v) => v === 0 || !!v) },
+        { where: { id } },
+      );
+    }
   }
 
   public async remove(ids: number[]) {
@@ -308,9 +333,9 @@ export default class CronService {
     const searchText = params?.searchValue;
     const page = Number(params?.page || '0');
     const size = Number(params?.size || '0');
-    const viewQuery = JSON.parse(params?.queryString || '{}');
-    const filterQuery = JSON.parse(params?.filters || '{}');
-    const sorterQuery = JSON.parse(params?.sorter || '{}');
+    const viewQuery = safeJSONParse(params?.queryString);
+    const filterQuery = safeJSONParse(params?.filters);
+    const sorterQuery = safeJSONParse(params?.sorter);
 
     let query: any = {};
     let order = [
@@ -370,7 +395,7 @@ export default class CronService {
         try {
           await killTask(doc.pid);
         } catch (error) {
-          this.logger.silly(error);
+          this.logger.error(error);
         }
       }
     }
@@ -381,65 +406,57 @@ export default class CronService {
     );
   }
 
-  private async runSingle(cronId: number): Promise<number> {
-    return taskLimit.runWithCpuLimit(() => {
+  private async runSingle(cronId: number): Promise<number | void> {
+    return taskLimit.runWithCronLimit(() => {
       return new Promise(async (resolve: any) => {
         const cron = await this.getDb({ id: cronId });
+        const params = {
+          name: cron.name,
+          command: cron.command,
+          schedule: cron.schedule,
+          extraSchedules: cron.extra_schedules,
+        };
         if (cron.status !== CrontabStatus.queued) {
-          resolve();
+          resolve(params);
           return;
         }
 
+        this.logger.info(
+          `[panel][开始执行任务] 参数 ${JSON.stringify(params)}`,
+        );
+
         let { id, command, log_path } = cron;
-        const absolutePath = path.resolve(config.logPath, `${log_path}`);
-        const logFileExist = log_path && (await fileExist(absolutePath));
-
-        this.logger.silly('Running job');
-        this.logger.silly('ID: ' + id);
-        this.logger.silly('Original command: ' + command);
-
-        let cmdStr = command;
-        if (!cmdStr.startsWith(TASK_PREFIX) && !cmdStr.startsWith(QL_PREFIX)) {
-          cmdStr = `${TASK_PREFIX}${cmdStr}`;
+        const uniqPath = await getUniqPath(command, `${id}`);
+        const logTime = dayjs().format('YYYY-MM-DD-HH-mm-ss-SSS');
+        const logDirPath = path.resolve(config.logPath, `${uniqPath}`);
+        if (log_path?.split('/')?.every((x) => x !== uniqPath)) {
+          await fs.mkdir(logDirPath, { recursive: true });
         }
-        if (
-          cmdStr.endsWith('.js') ||
-          cmdStr.endsWith('.py') ||
-          cmdStr.endsWith('.pyc') ||
-          cmdStr.endsWith('.sh') ||
-          cmdStr.endsWith('.ts')
-        ) {
-          cmdStr = `${cmdStr} now`;
-        }
+        const logPath = `${uniqPath}/${logTime}.log`;
+        const absolutePath = path.resolve(config.logPath, `${logPath}`);
 
-        const cp = spawn(`ID=${id} ${cmdStr}`, { shell: '/bin/bash' });
+        const cp = spawn(
+          `real_log_path=${logPath} no_delay=true ${this.makeCommand(cron)}`,
+          { shell: '/bin/bash' },
+        );
 
         await CrontabModel.update(
-          { status: CrontabStatus.running, pid: cp.pid },
+          { status: CrontabStatus.running, pid: cp.pid, log_path: logPath },
           { where: { id } },
         );
-        cp.stderr.on('data', (data) => {
-          if (logFileExist) {
-            fs.appendFileSync(`${absolutePath}`, `${data.toString()}`);
-          }
+        cp.stderr.on('data', async (data) => {
+          await fs.appendFile(`${absolutePath}`, `${data.toString()}`);
         });
-        cp.on('error', (err) => {
-          if (logFileExist) {
-            fs.appendFileSync(`${absolutePath}`, `${JSON.stringify(err)}`);
-          }
+        cp.on('error', async (err) => {
+          await fs.appendFile(`${absolutePath}`, `${JSON.stringify(err)}`);
         });
 
-        cp.on('exit', async (code, signal) => {
-          this.logger.info(
-            `任务 ${command} 进程id: ${cp.pid} 退出，退出码 ${code}`,
-          );
-        });
-        cp.on('close', async (code) => {
+        cp.on('exit', async (code) => {
           await CrontabModel.update(
             { status: CrontabStatus.idle, pid: undefined },
             { where: { id } },
           );
-          resolve();
+          resolve({ ...params, pid: cp.pid, code });
         });
       });
     });
@@ -455,11 +472,13 @@ export default class CronService {
     await CrontabModel.update({ isDisabled: 0 }, { where: { id: ids } });
     const docs = await CrontabModel.findAll({ where: { id: ids } });
     const sixCron = docs
-      .filter((x) => this.isSixCron(x))
+      .filter((x) => this.isNodeCron(x))
       .map((doc) => ({
+        name: doc.name || '',
         id: String(doc.id),
         schedule: doc.schedule!,
-        command: doc.command,
+        command: this.makeCommand(doc),
+        extraSchedules: doc.extra_schedules || [],
       }));
     await cronClient.addCron(sixCron);
     await this.set_crontab();
@@ -474,7 +493,7 @@ export default class CronService {
     const absolutePath = path.resolve(config.logPath, `${doc.log_path}`);
     const logFileExist = doc.log_path && (await fileExist(absolutePath));
     if (logFileExist) {
-      return getFileContentByName(`${absolutePath}`);
+      return await getFileContentByName(`${absolutePath}`);
     } else {
       return '任务未运行';
     }
@@ -488,26 +507,41 @@ export default class CronService {
 
     const relativeDir = path.dirname(`${doc.log_path}`);
     const dir = path.resolve(config.logPath, relativeDir);
-    if (existsSync(dir)) {
-      let files = await promises.readdir(dir);
-      return files
-        .map((x) => ({
-          filename: x,
-          directory: relativeDir.replace(config.logPath, ''),
-          time: fs.statSync(`${dir}/${x}`).mtime.getTime(),
-        }))
-        .sort((a, b) => b.time - a.time);
+    const dirExist = await fileExist(dir);
+    if (dirExist) {
+      let files = await fs.readdir(dir);
+      return (
+        await Promise.all(
+          files.map(async (x) => ({
+            filename: x,
+            directory: relativeDir.replace(config.logPath, ''),
+            time: (await fs.lstat(`${dir}/${x}`)).mtime.getTime(),
+          })),
+        )
+      ).sort((a, b) => b.time - a.time);
     } else {
       return [];
     }
   }
 
-  private make_command(tab: Crontab) {
+  private makeCommand(tab: Crontab) {
     let command = tab.command.trim();
     if (!command.startsWith(TASK_PREFIX) && !command.startsWith(QL_PREFIX)) {
       command = `${TASK_PREFIX}${tab.command}`;
     }
-    const crontab_job_string = `ID=${tab.id} ${command}`;
+    let commandVariable = `no_tee=true ID=${tab.id} `;
+    if (tab.task_before) {
+      commandVariable += `task_before='${tab.task_before
+        .replace(/'/g, "'\\''")
+        .trim()}' `;
+    }
+    if (tab.task_after) {
+      commandVariable += `task_after='${tab.task_after
+        .replace(/'/g, "'\\''")
+        .trim()}' `;
+    }
+
+    const crontab_job_string = `${commandVariable}${command}`;
     return crontab_job_string;
   }
 
@@ -516,22 +550,25 @@ export default class CronService {
     var crontab_string = '';
     tabs.data.forEach((tab) => {
       const _schedule = tab.schedule && tab.schedule.split(/ +/);
-      if (tab.isDisabled === 1 || _schedule!.length !== 5) {
+      if (
+        tab.isDisabled === 1 ||
+        _schedule!.length !== 5 ||
+        tab.extra_schedules?.length
+      ) {
         crontab_string += '# ';
         crontab_string += tab.schedule;
         crontab_string += ' ';
-        crontab_string += this.make_command(tab);
+        crontab_string += this.makeCommand(tab);
         crontab_string += '\n';
       } else {
         crontab_string += tab.schedule;
         crontab_string += ' ';
-        crontab_string += this.make_command(tab);
+        crontab_string += this.makeCommand(tab);
         crontab_string += '\n';
       }
     });
 
-    this.logger.silly(crontab_string);
-    fs.writeFileSync(config.crontabFile, crontab_string);
+    await fs.writeFile(config.crontabFile, crontab_string);
 
     execSync(`crontab ${config.crontabFile}`);
     await CrontabModel.update({ saved: true }, { where: {} });
@@ -576,11 +613,13 @@ export default class CronService {
     this.set_crontab(tabs);
 
     const sixCron = tabs.data
-      .filter((x) => this.isSixCron(x) && x.isDisabled !== 1)
+      .filter((x) => this.isNodeCron(x) && x.isDisabled !== 1)
       .map((doc) => ({
+        name: doc.name || '',
         id: String(doc.id),
         schedule: doc.schedule!,
-        command: doc.command,
+        command: this.makeCommand(doc),
+        extraSchedules: doc.extra_schedules || [],
       }));
     await cronClient.addCron(sixCron);
   }

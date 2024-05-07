@@ -1,6 +1,14 @@
 import intl from 'react-intl-universal';
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, message, Input, Form, Statistic, Button } from 'antd';
+import {
+  Modal,
+  message,
+  Input,
+  Form,
+  Statistic,
+  Button,
+  Typography,
+} from 'antd';
 import { request } from '@/utils/http';
 import config from '@/utils/config';
 import {
@@ -10,6 +18,7 @@ import {
 import { PageLoading } from '@ant-design/pro-layout';
 import { logEnded } from '@/utils';
 import { CrontabStatus } from './type';
+import Ansi from 'ansi-to-react';
 
 const { Countdown } = Statistic;
 
@@ -31,6 +40,7 @@ const CronLogModal = ({
   const [executing, setExecuting] = useState<any>(true);
   const [isPhone, setIsPhone] = useState(false);
   const scrollInfoRef = useRef({ value: 0, down: true });
+  const uniqPath = logUrl ? logUrl : String(cron?.id);
 
   const getCronLog = (isFirst?: boolean) => {
     if (isFirst) {
@@ -41,7 +51,7 @@ const CronLogModal = ({
       .then(({ code, data }) => {
         if (
           code === 200 &&
-          localStorage.getItem('logCron') === String(cron.id) &&
+          localStorage.getItem('logCron') === uniqPath &&
           data !== value
         ) {
           const log = data as string;
@@ -49,10 +59,15 @@ const CronLogModal = ({
           const hasNext = Boolean(
             log && !logEnded(log) && !log.includes('任务未运行'),
           );
+          if (!hasNext && !logEnded(value) && value !== intl.get('启动中...')) {
+            setTimeout(() => {
+              autoScroll();
+            });
+          }
           setExecuting(hasNext);
-          autoScroll();
           if (hasNext) {
             setTimeout(() => {
+              autoScroll();
               getCronLog();
             }, 2000);
           }
@@ -74,7 +89,7 @@ const CronLogModal = ({
       document
         .querySelector('#log-flag')!
         .scrollIntoView({ behavior: 'smooth' });
-    }, 1000);
+    }, 600);
   };
 
   const cancel = () => {
@@ -82,29 +97,32 @@ const CronLogModal = ({
     handleCancel();
   };
 
-  const handleScroll = (e) => {
-    const sTop = e.target.scrollTop;
+  const handleScroll: React.UIEventHandler<HTMLDivElement> = (e) => {
+    const sTop = (e.target as HTMLDivElement).scrollTop;
     if (scrollInfoRef.current.down) {
       scrollInfoRef.current = {
         value: sTop,
-        down: sTop > scrollInfoRef.current.value,
+        down: sTop - scrollInfoRef.current.value > -5 || !sTop,
       };
     }
   };
 
   const titleElement = () => {
     return (
-      <>
+      <div style={{ display: 'flex', alignItems: 'center' }}>
         {(executing || loading) && <Loading3QuartersOutlined spin />}
         {!executing && !loading && <CheckCircleOutlined />}
-        <span style={{ marginLeft: 5 }}>{cron && cron.name}</span>
-      </>
+        <Typography.Text ellipsis={true} style={{ marginLeft: 5 }}>
+          {cron && cron.name}
+        </Typography.Text>
+      </div>
     );
   };
 
   useEffect(() => {
     if (cron && cron.id && visible) {
       getCronLog(true);
+      scrollInfoRef.current.down = true;
     }
   }, [cron, visible]);
 
@@ -147,7 +165,7 @@ const CronLogModal = ({
                 : {}
             }
           >
-            {value}
+            <Ansi>{value}</Ansi>
           </pre>
         )}
         <div id="log-flag"></div>

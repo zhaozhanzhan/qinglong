@@ -9,11 +9,58 @@ import { Op } from 'sequelize';
 import config from '../config';
 import { CrontabViewModel, CronViewType } from '../data/cronView';
 import { initPosition } from '../data/env';
+import { AuthDataType, SystemModel } from '../data/system';
+import SystemService from '../services/system';
 
 export default async () => {
   const cronService = Container.get(CronService);
   const envService = Container.get(EnvService);
   const dependenceService = Container.get(DependenceService);
+  const systemService = Container.get(SystemService);
+
+  const installDependencies = () => {
+    // 初始化时安装所有处于安装中，安装成功，安装失败的依赖
+    DependenceModel.findAll({
+      where: {},
+      order: [
+        ['type', 'DESC'],
+        ['createdAt', 'DESC'],
+      ],
+      raw: true,
+    }).then(async (docs) => {
+      await DependenceModel.update(
+        { status: DependenceStatus.queued, log: [] },
+        { where: { id: docs.map((x) => x.id!) } },
+      );
+      setTimeout(() => {
+        dependenceService.installDependenceOneByOne(docs);
+      }, 5000);
+    });
+  };
+
+  // 初始化更新 linux/python/nodejs 镜像源配置
+  const systemConfig = await systemService.getSystemConfig();
+  if (systemConfig.info?.pythonMirror) {
+    systemService.updatePythonMirror({
+      pythonMirror: systemConfig.info?.pythonMirror,
+    });
+  }
+  if (systemConfig.info?.linuxMirror) {
+    systemService.updateLinuxMirror(
+      {
+        linuxMirror: systemConfig.info?.linuxMirror,
+      },
+      undefined,
+      () => installDependencies(),
+    );
+  } else {
+    installDependencies();
+  }
+  if (systemConfig.info?.nodeMirror) {
+    systemService.updateNodeMirror({
+      nodeMirror: systemConfig.info?.nodeMirror,
+    });
+  }
 
   // 初始化新增默认全部任务视图
   CrontabViewModel.findAll({
@@ -31,22 +78,6 @@ export default async () => {
 
   // 初始化更新所有任务状态为空闲
   await CrontabModel.update({ status: CrontabStatus.idle }, { where: {} });
-
-  // 初始化时安装所有处于安装中，安装成功，安装失败的依赖
-  DependenceModel.findAll({
-    where: {},
-    order: [
-      ['type', 'DESC'],
-      ['createdAt', 'DESC'],
-    ],
-    raw: true,
-  }).then(async (docs) => {
-    await DependenceModel.update(
-      { status: DependenceStatus.queued, log: [] },
-      { where: { id: docs.map((x) => x.id!) } },
-    );
-    dependenceService.installDependenceOneByOne(docs);
-  });
 
   // 初始化时执行一次所有的 ql repo 任务
   CrontabModel.findAll({
@@ -127,4 +158,7 @@ export default async () => {
   // 初始化保存一次ck和定时任务数据
   await cronService.autosave_crontab();
   await envService.set_envs();
+
+  // 初始化增加系统配置
+  await SystemModel.upsert({ type: AuthDataType.systemConfig });
 };

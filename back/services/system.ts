@@ -1,31 +1,38 @@
+import { spawn } from 'cross-spawn';
 import { Response } from 'express';
-import { Service, Inject } from 'typedi';
+import fs from 'fs';
+import got from 'got';
+import sum from 'lodash/sum';
+import path from 'path';
+import { Inject, Service } from 'typedi';
 import winston from 'winston';
 import config from '../config';
-import {
-  AuthDataType,
-  AuthInfo,
-  AuthInstance,
-  AuthModel,
-  AuthModelInfo,
-} from '../data/auth';
-import { NotificationInfo } from '../data/notify';
-import NotificationService from './notify';
-import ScheduleService, { TaskCallbacks } from './schedule';
-import { spawn } from 'cross-spawn';
-import SockService from './sock';
-import got from 'got';
+import { TASK_COMMAND } from '../config/const';
 import {
   getPid,
   killTask,
   parseContentVersion,
   parseVersion,
   promiseExec,
+  readDirs,
 } from '../config/util';
-import { TASK_COMMAND } from '../config/const';
+import {
+  DependenceModel,
+  DependenceStatus,
+  DependenceTypes,
+} from '../data/dependence';
+import { NotificationInfo } from '../data/notify';
+import {
+  AuthDataType,
+  AuthInfo,
+  SystemInstance,
+  SystemModel,
+  SystemModelInfo,
+} from '../data/system';
 import taskLimit from '../shared/pLimit';
-import tar from 'tar';
-import path from 'path';
+import NotificationService from './notify';
+import ScheduleService, { TaskCallbacks } from './schedule';
+import SockService from './sock';
 
 @Service()
 export default class SystemService {
@@ -40,17 +47,17 @@ export default class SystemService {
 
   public async getSystemConfig() {
     const doc = await this.getDb({ type: AuthDataType.systemConfig });
-    return doc || ({} as AuthInstance);
+    return doc || ({} as SystemInstance);
   }
 
-  private async updateAuthDb(payload: AuthInfo): Promise<AuthInstance> {
-    await AuthModel.upsert({ ...payload });
+  private async updateAuthDb(payload: AuthInfo): Promise<SystemInstance> {
+    await SystemModel.upsert({ ...payload });
     const doc = await this.getDb({ type: payload.type });
     return doc;
   }
 
-  public async getDb(query: any): Promise<AuthInstance> {
-    const doc: any = await AuthModel.findOne({ where: { ...query } });
+  public async getDb(query: any): Promise<SystemInstance> {
+    const doc: any = await SystemModel.findOne({ where: { ...query } });
     return doc && doc.get({ plain: true });
   }
 
@@ -72,30 +79,172 @@ export default class SystemService {
     }
   }
 
-  public async updateSystemConfig(info: AuthModelInfo) {
+  public async updateLogRemoveFrequency(info: SystemModelInfo) {
     const oDoc = await this.getSystemConfig();
     const result = await this.updateAuthDb({
       ...oDoc,
-      type: AuthDataType.systemConfig,
-      info,
+      info: { ...oDoc.info, ...info },
     });
-    if (info.logRemoveFrequency) {
-      const cron = {
-        id: result.id,
-        name: '删除日志',
-        command: `ql rmlog ${info.logRemoveFrequency}`,
-      };
+    const cron = {
+      id: result.id || NaN,
+      name: '删除日志',
+      command: `ql rmlog ${info.logRemoveFrequency}`,
+    };
+    if (oDoc.info?.logRemoveFrequency) {
       await this.scheduleService.cancelIntervalTask(cron);
-      if (info.logRemoveFrequency > 0) {
-        this.scheduleService.createIntervalTask(cron, {
-          days: info.logRemoveFrequency,
-        });
-      }
     }
+    if (info.logRemoveFrequency && info.logRemoveFrequency > 0) {
+      this.scheduleService.createIntervalTask(cron, {
+        days: info.logRemoveFrequency,
+      });
+    }
+    return { code: 200, data: info };
+  }
+
+  public async updateCronConcurrency(info: SystemModelInfo) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
     if (info.cronConcurrency) {
       await taskLimit.setCustomLimit(info.cronConcurrency);
     }
     return { code: 200, data: info };
+  }
+
+  public async updateDependenceProxy(info: SystemModelInfo) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
+    if (info.dependenceProxy) {
+      await fs.promises.writeFile(
+        config.dependenceProxyFile,
+        `export http_proxy="${info.dependenceProxy}"\nexport https_proxy="${info.dependenceProxy}"`,
+      );
+    } else {
+      await fs.promises.rm(config.dependenceProxyFile);
+    }
+    return { code: 200, data: info };
+  }
+
+  public async updateNodeMirror(info: SystemModelInfo, res?: Response) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
+    let cmd = 'pnpm config delete registry';
+    if (info.nodeMirror) {
+      cmd = `pnpm config set registry ${info.nodeMirror}`;
+    }
+    let command = `cd && ${cmd}`;
+    const docs = await DependenceModel.findAll({
+      where: {
+        type: DependenceTypes.nodejs,
+        status: DependenceStatus.installed,
+      },
+    });
+    if (docs.length > 0) {
+      command += ` && pnpm i -g`;
+    }
+    this.scheduleService.runTask(
+      command,
+      {
+        onStart: async (cp) => {
+          res?.setHeader('QL-Task-Pid', `${cp.pid}`);
+          res?.end();
+        },
+        onEnd: async () => {
+          this.sockService.sendMessage({
+            type: 'updateNodeMirror',
+            message: 'update node mirror end',
+          });
+        },
+        onError: async (message: string) => {
+          this.sockService.sendMessage({ type: 'updateNodeMirror', message });
+        },
+        onLog: async (message: string) => {
+          this.sockService.sendMessage({ type: 'updateNodeMirror', message });
+        },
+      },
+      {
+        command,
+      },
+    );
+  }
+
+  public async updatePythonMirror(info: SystemModelInfo) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
+    let cmd = 'pip config unset global.index-url';
+    if (info.pythonMirror) {
+      cmd = `pip3 config set global.index-url ${info.pythonMirror}`;
+    }
+    await promiseExec(cmd);
+    return { code: 200, data: info };
+  }
+
+  public async updateLinuxMirror(
+    info: SystemModelInfo,
+    res?: Response,
+    onEnd?: () => void,
+  ) {
+    const oDoc = await this.getSystemConfig();
+    await this.updateAuthDb({
+      ...oDoc,
+      info: { ...oDoc.info, ...info },
+    });
+    let defaultDomain = 'https://dl-cdn.alpinelinux.org';
+    let targetDomain = 'https://dl-cdn.alpinelinux.org';
+    const content = await fs.promises.readFile('/etc/apk/repositories', {
+      encoding: 'utf-8',
+    });
+    const domainMatch = content.match(/(http.*)\/alpine\/.*/);
+    if (domainMatch) {
+      defaultDomain = domainMatch[1];
+    }
+    if (info.linuxMirror) {
+      targetDomain = info.linuxMirror;
+    }
+    const command = `sed -i 's/${defaultDomain.replace(
+      /\//g,
+      '\\/',
+    )}/${targetDomain.replace(
+      /\//g,
+      '\\/',
+    )}/g' /etc/apk/repositories && apk update -f`;
+
+    this.scheduleService.runTask(
+      command,
+      {
+        onStart: async (cp) => {
+          res?.setHeader('QL-Task-Pid', `${cp.pid}`);
+          res?.end();
+        },
+        onEnd: async () => {
+          this.sockService.sendMessage({
+            type: 'updateLinuxMirror',
+            message: 'update linux mirror end',
+          });
+          onEnd?.();
+        },
+        onError: async (message: string) => {
+          this.sockService.sendMessage({ type: 'updateLinuxMirror', message });
+        },
+        onLog: async (message: string) => {
+          this.sockService.sendMessage({ type: 'updateLinuxMirror', message });
+        },
+      },
+      {
+        command,
+      },
+    );
   }
 
   public async checkUpdate() {
@@ -157,7 +306,7 @@ export default class SystemService {
   }
 
   public async updateSystem() {
-    const cp = spawn('ql -l update false', { shell: '/bin/bash' });
+    const cp = spawn('real_time=true ql update false', { shell: '/bin/bash' });
 
     cp.stdout.on('data', (data) => {
       this.sockService.sendMessage({
@@ -183,30 +332,10 @@ export default class SystemService {
     return { code: 200 };
   }
 
-  public async reloadSystem(target: 'system' | 'data') {
-    const cp = spawn(`ql -l reload ${target || ''}`, { shell: '/bin/bash' });
-
-    cp.stdout.on('data', (data) => {
-      this.sockService.sendMessage({
-        type: 'reloadSystem',
-        message: data.toString(),
-      });
-    });
-
-    cp.stderr.on('data', (data) => {
-      this.sockService.sendMessage({
-        type: 'reloadSystem',
-        message: data.toString(),
-      });
-    });
-
-    cp.on('error', (err) => {
-      this.sockService.sendMessage({
-        type: 'reloadSystem',
-        message: JSON.stringify(err),
-      });
-    });
-
+  public async reloadSystem(target?: 'system' | 'data') {
+    const cmd = `real_time=true ql reload ${target || ''}`;
+    const cp = spawn(cmd, { shell: '/bin/bash' });
+    cp.unref();
     return { code: 200 };
   }
 
@@ -229,6 +358,9 @@ export default class SystemService {
     this.scheduleService.runTask(
       `real_log_path=${logPath} real_time=true ${command}`,
       callback,
+      {
+        command,
+      },
     );
   }
 
@@ -256,10 +388,7 @@ export default class SystemService {
 
   public async exportData(res: Response) {
     try {
-      await tar.create(
-        { gzip: true, file: config.dataTgzFile, cwd: config.rootPath },
-        ['data'],
-      );
+      await promiseExec(`cd ${config.rootPath} && tar -zcvf ${config.dataTgzFile} data/`);
       res.download(config.dataTgzFile);
     } catch (error: any) {
       return res.send({ code: 400, message: error.message });
@@ -269,10 +398,37 @@ export default class SystemService {
   public async importData() {
     try {
       await promiseExec(`rm -rf ${path.join(config.tmpPath, 'data')}`);
-      await tar.x({ file: config.dataTgzFile, cwd: config.tmpPath });
-      return { code: 200 };
+      const res = await promiseExec(
+        `cd ${config.tmpPath} && tar -zxvf data.tgz`,
+      );
+      return { code: 200, data: res };
     } catch (error: any) {
       return { code: 400, message: error.message };
     }
+  }
+
+  public async getSystemLog(res: Response) {
+    const result = await readDirs(config.systemLogPath, config.systemLogPath);
+    const logs = result.reverse().filter((x) => x.title.endsWith('.log'));
+    res.set({
+      'Content-Length': sum(logs.map((x) => x.size)),
+    });
+    (function sendFiles(res, fileNames) {
+      if (fileNames.length === 0) {
+        res.end();
+        return;
+      }
+
+      const currentLog = fileNames.shift();
+      if (currentLog) {
+        const currentFileStream = fs.createReadStream(
+          path.join(config.systemLogPath, currentLog.title),
+        );
+        currentFileStream.on('end', () => {
+          sendFiles(res, fileNames);
+        });
+        currentFileStream.pipe(res, { end: false });
+      }
+    })(res, logs);
   }
 }

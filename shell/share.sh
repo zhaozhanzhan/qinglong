@@ -19,7 +19,6 @@ dir_update_log=$dir_log/update
 ql_static_repo=$dir_repo/static
 
 ## 文件
-file_ecosystem_js=$dir_root/ecosystem.config.js
 file_config_sample=$dir_sample/config.sample.sh
 file_env=$dir_config/env.sh
 file_sharecode=$dir_config/sharecode.sh
@@ -34,8 +33,12 @@ file_task_sample=$dir_sample/task.sample.sh
 file_extra_sample=$dir_sample/extra.sample.sh
 file_notify_js_sample=$dir_sample/notify.js
 file_notify_py_sample=$dir_sample/notify.py
+file_test_js_sample=$dir_sample/ql_sample.js
+file_test_py_sample=$dir_sample/ql_sample.py
 file_notify_py=$dir_scripts/notify.py
 file_notify_js=$dir_scripts/sendNotify.js
+file_test_js=$dir_scripts/ql_sample.js
+file_test_py=$dir_scripts/ql_sample.py
 nginx_app_conf=$dir_root/docker/front.conf
 nginx_conf=$dir_root/docker/nginx.conf
 dep_notify_py=$dir_dep/notify.py
@@ -69,9 +72,10 @@ import_config() {
   [[ -f $file_env ]] && . $file_env
 
   ql_base_url=${QlBaseUrl:-"/"}
+  ql_port=${QlPort:-"5700"}
   command_timeout_time=${CommandTimeoutTime:-""}
-  proxy_url=${ProxyUrl:-""}
   file_extensions=${RepoFileExtensions:-"js py"}
+  proxy_url=${ProxyUrl:-""}
   current_branch=${QL_BRANCH}
 
   if [[ -n "${DefaultCronRule}" ]]; then
@@ -99,9 +103,6 @@ set_proxy() {
 unset_proxy() {
   unset http_proxy
   unset https_proxy
-  unset ftp_proxy
-  unset all_proxy
-  unset no_proxy
 }
 
 make_dir() {
@@ -237,6 +238,16 @@ fix_config() {
     echo
   fi
 
+  if [[ ! -s $file_test_js ]]; then
+    cp -fv $file_test_js_sample $file_test_js
+    echo
+  fi
+
+  if [[ ! -s $file_test_py ]]; then
+    cp -fv $file_test_py_sample $file_test_py
+    echo
+  fi
+
   if [[ -s /etc/nginx/conf.d/default.conf ]]; then
     echo -e "检测到默认nginx配置文件，清空...\n"
     cat /dev/null >/etc/nginx/conf.d/default.conf
@@ -296,7 +307,7 @@ git_clone_scripts() {
 
   set_proxy "$proxy"
 
-  git clone --depth=1 $part_cmd $url $dir
+  git clone -q --depth=1 $part_cmd $url $dir
   exit_status=$?
 
   unset_proxy
@@ -308,12 +319,23 @@ random_range() {
   echo $((RANDOM % ($end - $beg) + $beg))
 }
 
+delete_pm2() {
+  cd $dir_root
+  pm2 delete ecosystem.config.js
+}
+
 reload_pm2() {
   cd $dir_root
-  # 代理会影响 grpc 服务
-  unset_proxy
+  restore_env_vars
   pm2 flush &>/dev/null
-  pm2 startOrGracefulReload $file_ecosystem_js --update-env
+  pm2 startOrGracefulReload ecosystem.config.js
+}
+
+reload_update() {
+  cd $dir_root
+  restore_env_vars
+  pm2 flush &>/dev/null
+  pm2 startOrGracefulReload other.config.js
 }
 
 diff_time() {
@@ -365,8 +387,6 @@ format_timestamp() {
 patch_version() {
   git config --global pull.rebase false
 
-  cp -f $dir_root/.env.example $dir_root/.env
-
   if [[ -f "$dir_root/db/cookie.db" ]]; then
     echo -e "检测到旧的db文件，拷贝为新db...\n"
     mv $dir_root/db/cookie.db $dir_root/db/env.db
@@ -406,8 +426,18 @@ init_nginx() {
   local aliasStr=""
   local rootStr=""
   if [[ $ql_base_url != "/" ]]; then
+    if [[ $ql_base_url != /* ]]; then
+      ql_base_url="/$ql_base_url"
+    fi
+    if [[ $ql_base_url != */ ]]; then
+      ql_base_url="$ql_base_url/"
+    fi
     location_url="^~${ql_base_url%*/}"
     aliasStr="alias ${dir_static}/dist;"
+    if ! grep -q "<base href=\"$ql_base_url\">" "${dir_static}/dist/index.html"; then
+      awk -v text="<base href=\"$ql_base_url\">" '/<link/ && !inserted {print text; inserted=1} 1' "${dir_static}/dist/index.html" >temp.html
+      mv temp.html "${dir_static}/dist/index.html"
+    fi
   else
     rootStr="root ${dir_static}/dist;"
   fi
@@ -416,27 +446,45 @@ init_nginx() {
   sed -i "s,QL_BASE_URL_LOCATION,${location_url},g" /etc/nginx/conf.d/front.conf
   sed -i "s,QL_BASE_URL,${ql_base_url},g" /etc/nginx/conf.d/front.conf
 
-  ipv6=$(ip a | grep inet6)
-  ipv6Str=""
+  local ipv6=$(ip a | grep inet6)
+  local ipv6Str=""
   if [[ $ipv6 ]]; then
-    ipv6Str="listen [::]:5700 ipv6only=on;"
+    ipv6Str="listen [::]:${ql_port} ipv6only=on;"
   fi
+
+  local ipv4Str="listen ${ql_port};"
   sed -i "s,IPV6_CONFIG,${ipv6Str},g" /etc/nginx/conf.d/front.conf
+  sed -i "s,IPV4_CONFIG,${ipv4Str},g" /etc/nginx/conf.d/front.conf
 }
 
-handle_task_before() {
+handle_task_start() {
   [[ $ID ]] && update_cron "\"$ID\"" "0" "$$" "$log_path" "$begin_timestamp"
-
   echo -e "## 开始执行... $begin_time\n"
+}
 
+run_task_before() {
   [[ $is_macos -eq 0 ]] && check_server
 
   . $file_task_before "$@"
+
+  if [[ $task_before ]]; then
+    echo -e "执行前置命令\n"
+    eval "$task_before"
+    echo -e "\n执行前置命令结束\n"
+  fi
 }
 
-handle_task_after() {
+run_task_after() {
   . $file_task_after "$@"
 
+  if [[ $task_after ]]; then
+    echo -e "\n执行后置命令\n"
+    eval "$task_after"
+    echo -e "\n执行后置命令结束"
+  fi
+}
+
+handle_task_end() {
   local etime=$(date "+$time_format")
   local end_time=$(format_time "$time_format" "$etime")
   local end_timestamp=$(format_timestamp "$time_format" "$etime")
@@ -444,8 +492,7 @@ handle_task_after() {
 
   [[ "$diff_time" == 0 ]] && diff_time=1
 
-  echo -e "\n\n## 执行结束... $end_time  耗时 $diff_time 秒　　　　　"
-
+  echo -e "\n## 执行结束... $end_time  耗时 $diff_time 秒　　　　　"
   [[ $ID ]] && update_cron "\"$ID\"" "1" "" "$log_path" "$begin_timestamp" "$diff_time"
 }
 

@@ -1,5 +1,11 @@
 import intl from 'react-intl-universal';
-import React, { useEffect, useState, useRef } from 'react';
+import React, {
+  useEffect,
+  useState,
+  useRef,
+  useCallback,
+  useReducer,
+} from 'react';
 import { Drawer, Button, Tabs, Badge, Select, TreeSelect } from 'antd';
 import { request } from '@/utils/http';
 import config from '@/utils/config';
@@ -9,6 +15,8 @@ import SaveModal from './saveModal';
 import SettingModal from './setting';
 import { useTheme } from '@/utils/hooks';
 import { getEditorMode, logEnded } from '@/utils';
+import WebSocketManager from '@/utils/websocket';
+import Ansi from 'ansi-to-react';
 
 const { Option } = Select;
 
@@ -18,28 +26,25 @@ const EditModal = ({
   content,
   handleCancel,
   visible,
-  socketMessage,
 }: {
   treeData?: any;
   content?: string;
   visible: boolean;
-  socketMessage: any;
   currentNode: any;
   handleCancel: () => void;
 }) => {
   const [value, setValue] = useState('');
   const [language, setLanguage] = useState<string>('javascript');
   const [cNode, setCNode] = useState<any>();
-  const [selectedKey, setSelectedKey] = useState<string>('');
+  const [selectedKey, setSelectedKey] = useState<string>();
   const [saveModalVisible, setSaveModalVisible] = useState<boolean>(false);
   const [settingModalVisible, setSettingModalVisible] =
     useState<boolean>(false);
-  const [log, setLog] = useState<string>('');
+  const [log, setLog] = useState('');
   const { theme } = useTheme();
   const editorRef = useRef<any>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [currentPid, setCurrentPid] = useState(null);
-
   const cancel = () => {
     handleCancel();
   };
@@ -62,7 +67,11 @@ const EditModal = ({
 
   const getDetail = (node: any) => {
     request
-      .get(`${config.apiPrefix}scripts/${node.title}?path=${node.parent || ''}`)
+      .get(
+        `${config.apiPrefix}scripts/detail?file=${node.title}&path=${
+          node.parent || ''
+        }`,
+      )
       .then(({ code, data }) => {
         if (code === 200) {
           setValue(data);
@@ -104,28 +113,25 @@ const EditModal = ({
       });
   };
 
-  useEffect(() => {
-    if (!socketMessage) {
-      return;
-    }
-
-    let { type, message: _message, references } = socketMessage;
-
-    if (type !== 'manuallyRunScript') {
-      return;
-    }
-
+  const handleMessage = useCallback((payload: any) => {
+    let { message: _message } = payload;
     if (logEnded(_message)) {
       setTimeout(() => {
         setIsRunning(false);
       }, 300);
     }
 
-    if (log) {
-      _message = `\n${_message}`;
-    }
-    setLog(`${log}${_message}`);
-  }, [socketMessage]);
+    setLog((p) => `${p}${_message}`);
+  }, []);
+
+  useEffect(() => {
+    const ws = WebSocketManager.getInstance();
+    ws.subscribe('manuallyRunScript', handleMessage);
+
+    return () => {
+      ws.unsubscribe('manuallyRunScript', handleMessage);
+    };
+  }, []);
 
   useEffect(() => {
     setLog('');
@@ -146,7 +152,7 @@ const EditModal = ({
         <>
           <TreeSelect
             treeExpandAction="click"
-            style={{ marginRight: 8, width: 150 }}
+            style={{ marginRight: 8, width: 300 }}
             value={selectedKey}
             dropdownStyle={{ maxHeight: 400, overflow: 'auto' }}
             treeData={treeData}
@@ -154,6 +160,7 @@ const EditModal = ({
             fieldNames={{ value: 'key', label: 'title' }}
             showSearch
             onSelect={onSelect}
+            treeLine={{ showLeafIcon: true }}
           />
           <Select
             value={language}
@@ -224,6 +231,7 @@ const EditModal = ({
         minSize={200}
         defaultSize="50%"
         style={{ height: 'calc(100vh - 55px)' }}
+        pane2Style={{ overflowY: 'auto' }}
       >
         <Editor
           language={language}
@@ -241,11 +249,10 @@ const EditModal = ({
         />
         <pre
           style={{
-            height: '100%',
             padding: '0 15px',
           }}
         >
-          {log}
+          <Ansi>{log}</Ansi>
         </pre>
       </SplitPane>
       <SaveModal

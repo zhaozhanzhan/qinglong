@@ -18,6 +18,7 @@ export enum NotificationMode {
   'pushMe' = 'pushMe',
   'feishu' = 'feishu',
   'webhook' = 'webhook',
+  'chronocat' = 'Chronocat',
 }
 
 abstract class NotificationBaseInfo {
@@ -55,6 +56,9 @@ export class BarkNotification extends NotificationBaseInfo {
   public barkIcon = 'https://qn.whyour.cn/logo.png';
   public barkSound = '';
   public barkGroup = 'qinglong';
+  public barkLevel = 'active';
+  public barkUrl = '';
+  public barkArchive=""
 }
 
 export class TelegramBotNotification extends NotificationBaseInfo {
@@ -63,7 +67,7 @@ export class TelegramBotNotification extends NotificationBaseInfo {
   public telegramBotProxyHost = '';
   public telegramBotProxyPort = '';
   public telegramBotProxyAuth = '';
-  public telegramBotApiHost = 'api.telegram.org';
+  public telegramBotApiHost = 'https://api.telegram.org';
 }
 
 export class DingtalkBotNotification extends NotificationBaseInfo {
@@ -106,6 +110,12 @@ export class PushMeNotification extends NotificationBaseInfo {
   public pushMeKey: string = '';
 }
 
+export class ChronocatNotification extends NotificationBaseInfo {
+  public chronocatURL: string = '';
+  public chronocatQQ: string = '';
+  public chronocatToken: string = '';
+}
+
 export class WebhookNotification extends NotificationBaseInfo {
   public webhookHeaders: string = '';
   public webhookBody: string = '';
@@ -138,4 +148,6 @@ export interface NotificationInfo
     EmailNotification,
     PushMeNotification,
     WebhookNotification,
+    ChronocatNotification,
     LarkNotification {}
+    

@@ -1,4 +1,4 @@
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import * as path from 'path';
 import got from 'got';
 import iconv from 'iconv-lite';
@@ -9,23 +9,28 @@ import { promisify } from 'util';
 import { load } from 'js-yaml';
 import config from './index';
 import { TASK_COMMAND } from './const';
+import Logger from '../loaders/logger';
 
-export function getFileContentByName(fileName: string) {
-  if (fs.existsSync(fileName)) {
-    return fs.readFileSync(fileName, 'utf8');
+export * from './share';
+
+export async function getFileContentByName(fileName: string) {
+  const _exsit = await fileExist(fileName);
+  if (_exsit) {
+    return await fs.readFile(fileName, 'utf8');
   }
   return '';
 }
 
-export function getLastModifyFilePath(dir: string) {
+export async function getLastModifyFilePath(dir: string) {
   let filePath = '';
 
-  if (fs.existsSync(dir)) {
-    const arr = fs.readdirSync(dir);
+  const _exsit = await fileExist(dir);
+  if (_exsit) {
+    const arr = await fs.readdir(dir);
 
-    arr.forEach((item) => {
+    arr.forEach(async (item) => {
       const fullpath = path.join(dir, item);
-      const stats = fs.statSync(fullpath);
+      const stats = await fs.lstat(fullpath);
       if (stats.isFile()) {
         if (stats.mtimeMs >= 0) {
           filePath = fullpath;
@@ -34,91 +39,6 @@ export function getLastModifyFilePath(dir: string) {
     });
   }
   return filePath;
-}
-
-export function createRandomString(min: number, max: number): string {
-  const num = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
-  const english = [
-    'a',
-    'b',
-    'c',
-    'd',
-    'e',
-    'f',
-    'g',
-    'h',
-    'i',
-    'j',
-    'k',
-    'l',
-    'm',
-    'n',
-    'o',
-    'p',
-    'q',
-    'r',
-    's',
-    't',
-    'u',
-    'v',
-    'w',
-    'x',
-    'y',
-    'z',
-  ];
-  const ENGLISH = [
-    'A',
-    'B',
-    'C',
-    'D',
-    'E',
-    'F',
-    'G',
-    'H',
-    'I',
-    'J',
-    'K',
-    'L',
-    'M',
-    'N',
-    'O',
-    'P',
-    'Q',
-    'R',
-    'S',
-    'T',
-    'U',
-    'V',
-    'W',
-    'X',
-    'Y',
-    'Z',
-  ];
-  const special = ['-', '_'];
-  const config = num.concat(english).concat(ENGLISH).concat(special);
-
-  const arr = [];
-  arr.push(getOne(num));
-  arr.push(getOne(english));
-  arr.push(getOne(ENGLISH));
-  arr.push(getOne(special));
-
-  const len = min + Math.floor(Math.random() * (max - min + 1));
-
-  for (let i = 4; i < len; i++) {
-    arr.push(config[Math.floor(Math.random() * config.length)]);
-  }
-
-  const newArr = [];
-  for (let j = 0; j < len; j++) {
-    newArr.push(arr.splice(Math.random() * arr.length, 1)[0]);
-  }
-
-  function getOne(arr: any[]) {
-    return arr[Math.floor(Math.random() * arr.length)];
-  }
-
-  return newArr.join('');
 }
 
 export function getToken(req: any) {
@@ -141,7 +61,8 @@ export async function getNetIp(req: any) {
       ...req.ips,
       req.socket.remoteAddress,
     ]),
-  ];
+  ].filter(Boolean);
+
   let ip = ipArray[0];
 
   if (ipArray.length > 1) {
@@ -162,34 +83,42 @@ export async function getNetIp(req: any) {
       break;
     }
   }
+
   ip = ip.substr(ip.lastIndexOf(':') + 1, ip.length);
   if (ip.includes('127.0') || ip.includes('192.168') || ip.includes('10.7')) {
     ip = '';
   }
+
+  if (!ip) {
+    return { address: `获取失败`, ip };
+  }
+
   try {
-    const baiduApi = got
-      .get(`https://www.cip.cc/${ip}`, { timeout: 10000, retry: 0 })
+    const csdnApi = got
+      .get(`https://searchplugin.csdn.net/api/v1/ip/get?ip=${ip}`, {
+        timeout: 10000,
+        retry: 0,
+      })
       .text();
-    const ipApi = got
+    const pconlineApi = got
       .get(`https://whois.pconline.com.cn/ipJson.jsp?ip=${ip}&json=true`, {
         timeout: 10000,
         retry: 0,
       })
       .buffer();
-    const [data, ipApiBody] = await await Promise.all<any>([baiduApi, ipApi]);
-
-    const ipRegx = /.*IP	:(.*)\n/;
-    const addrRegx = /.*数据二	:(.*)\n/;
-    if (data && ipRegx.test(data) && addrRegx.test(data)) {
-      const ip = data.match(ipRegx)[1];
-      const addr = data.match(addrRegx)[1];
-      return { address: addr, ip };
-    } else if (ipApiBody) {
-      const { addr, ip } = JSON.parse(iconv.decode(ipApiBody, 'GBK'));
-      return { address: `${addr}`, ip };
-    } else {
-      return { address: `获取失败`, ip };
+    const [csdnBody, pconlineBody] = await await Promise.all<any>([
+      csdnApi,
+      pconlineApi,
+    ]);
+    const csdnRes = JSON.parse(csdnBody);
+    const pconlineRes = JSON.parse(iconv.decode(pconlineBody, 'GBK'));
+    let address = '';
+    if (csdnBody && csdnRes.code == 200) {
+      address = csdnRes.data.address;
+    } else if (pconlineRes && pconlineRes.addr) {
+      address = pconlineRes.addr;
     }
+    return { address, ip };
   } catch (error) {
     return { address: `获取失败`, ip };
   }
@@ -229,22 +158,17 @@ export function getPlatform(userAgent: string): 'mobile' | 'desktop' {
 }
 
 export async function fileExist(file: any) {
-  return new Promise((resolve) => {
-    try {
-      fs.accessSync(file);
-      resolve(true);
-    } catch (error) {
-      resolve(false);
-    }
-  });
+  try {
+    await fs.access(file);
+    return true;
+  } catch (error) {
+    return false;
+  }
 }
 
 export async function createFile(file: string, data: string = '') {
-  return new Promise((resolve) => {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, data);
-    resolve(true);
-  });
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, data);
 }
 
 export async function handleLogPath(
@@ -307,61 +231,76 @@ interface IFile {
   type: 'directory' | 'file';
   parent: string;
   mtime: number;
+  size?: number;
   children?: IFile[];
 }
 
-export function dirSort(a: IFile, b: IFile) {
-  if (a.type !== b.type) return FileType[a.type] < FileType[b.type] ? -1 : 1;
-  else if (a.mtime !== b.mtime) return a.mtime > b.mtime ? -1 : 1;
+export function dirSort(a: IFile, b: IFile): number {
+  if (a.type === 'file' && b.type === 'file') {
+    return b.mtime - a.mtime;
+  } else if (a.type === 'directory' && b.type === 'directory') {
+    return a.title.localeCompare(b.title);
+  } else {
+    return a.type === 'directory' ? -1 : 1;
+  }
 }
 
-export function readDirs(
+export async function readDirs(
   dir: string,
   baseDir: string = '',
   blacklist: string[] = [],
-) {
+  sort: (a: IFile, b: IFile) => number = dirSort,
+): Promise<IFile[]> {
   const relativePath = path.relative(baseDir, dir);
-  const files = fs.readdirSync(dir);
-  const result: any = files
-    .filter((x) => !blacklist.includes(x))
-    .map((file: string) => {
-      const subPath = path.join(dir, file);
-      const stats = fs.statSync(subPath);
-      const key = path.join(relativePath, file);
-      if (stats.isDirectory()) {
-        return {
-          title: file,
-          key,
-          type: 'directory',
-          parent: relativePath,
-          mtime: stats.mtime.getTime(),
-          children: readDirs(subPath, baseDir).sort(dirSort),
-        };
-      }
-      return {
+  const files = await fs.readdir(dir);
+  const result: IFile[] = [];
+
+  for (const file of files) {
+    const subPath = path.join(dir, file);
+    const stats = await fs.lstat(subPath);
+    const key = path.join(relativePath, file);
+
+    if (blacklist.includes(file) || stats.isSymbolicLink()) {
+      continue;
+    }
+
+    if (stats.isDirectory()) {
+      const children = await readDirs(subPath, baseDir, blacklist, sort);
+      result.push({
         title: file,
-        type: 'file',
-        isLeaf: true,
         key,
+        type: 'directory',
         parent: relativePath,
         mtime: stats.mtime.getTime(),
-      };
-    });
-  return result.sort(dirSort);
+        children: children.sort(sort),
+      });
+    } else {
+      result.push({
+        title: file,
+        type: 'file',
+        key,
+        parent: relativePath,
+        size: stats.size,
+        mtime: stats.mtime.getTime(),
+      });
+    }
+  }
+
+  return result.sort(sort);
 }
 
-export function readDir(
+export async function readDir(
   dir: string,
   baseDir: string = '',
   blacklist: string[] = [],
 ) {
   const relativePath = path.relative(baseDir, dir);
-  const files = fs.readdirSync(dir);
+  const files = await fs.readdir(dir);
   const result: any = files
     .filter((x) => !blacklist.includes(x))
-    .map((file: string) => {
+    .map(async (file: string) => {
       const subPath = path.join(dir, file);
-      const stats = fs.statSync(subPath);
+      const stats = await fs.lstat(subPath);
       const key = path.join(relativePath, file);
       return {
         title: file,
@@ -373,23 +312,12 @@ export function readDir(
   return result;
 }
 
-export function emptyDir(path: string) {
-  const files = fs.readdirSync(path);
-  files.forEach((file) => {
-    const filePath = `${path}/${file}`;
-    const stats = fs.statSync(filePath);
-    if (stats.isDirectory()) {
-      emptyDir(filePath);
-    } else {
-      fs.unlinkSync(filePath);
-    }
-  });
-  fs.rmdirSync(path);
-}
-
 export async function promiseExec(command: string): Promise<string> {
   try {
-    const { stderr, stdout } = await promisify(exec)(command, { maxBuffer: 200 * 1024 * 1024, encoding: 'utf8' });
+    const { stderr, stdout } = await promisify(exec)(command, {
+      maxBuffer: 200 * 1024 * 1024,
+      encoding: 'utf8',
+    });
     return stdout || stderr;
   } catch (error) {
     return JSON.stringify(error);
@@ -398,7 +326,10 @@ export async function promiseExec(command: string): Promise<string> {
 
 export async function promiseExecSuccess(command: string): Promise<string> {
   try {
-    const { stdout } = await promisify(exec)(command, { maxBuffer: 200 * 1024 * 1024, encoding: 'utf8' });
+    const { stdout } = await promisify(exec)(command, {
+      maxBuffer: 200 * 1024 * 1024,
+      encoding: 'utf8',
+    });
     return stdout || '';
   } catch (error) {
     return '';
@@ -429,37 +360,49 @@ export function parseHeaders(headers: string) {
   return parsed;
 }
 
+function parseString(
+  input: string,
+  valueFormatFn?: (v: string) => string,
+): Record<string, string> {
+  const regex = /(\w+):\s*((?:(?!\n\w+:).)*)/g;
+  const matches: Record<string, string> = {};
+
+  let match;
+  while ((match = regex.exec(input)) !== null) {
+    const [, key, value] = match;
+    const _key = key.trim();
+    if (!_key || matches[_key]) {
+      continue;
+    }
+
+    let _value = value.trim();
+
+    try {
+      _value = valueFormatFn ? valueFormatFn(_value) : _value;
+      const jsonValue = JSON.parse(_value);
+      matches[_key] = jsonValue;
+    } catch (error) {
+      matches[_key] = _value;
+    }
+  }
+
+  return matches;
+}
+
 export function parseBody(
   body: string,
   contentType:
     | 'application/json'
     | 'multipart/form-data'
-    | 'application/x-www-form-urlencoded',
+    | 'application/x-www-form-urlencoded'
+    | 'text/plain',
+  valueFormatFn?: (v: string) => string,
 ) {
-  if (!body) return '';
+  if (contentType === 'text/plain' || !body) {
+    return valueFormatFn && body ? valueFormatFn(body) : body;
+  }
 
-  const parsed: any = {};
-  let key;
-  let val;
-  let i;
-
-  body &&
-    body.split('\n').forEach(function parser(line) {
-      i = line.indexOf(':');
-      key = line.substring(0, i).trim().toLowerCase();
-      val = line.substring(i + 1).trim();
-
-      if (!key || parsed[key]) {
-        return;
-      }
-
-      try {
-        const jsonValue = JSON.parse(val);
-        parsed[key] = jsonValue;
-      } catch (error) {
-        parsed[key] = val;
-      }
-    });
+  const parsed = parseString(body, valueFormatFn);
 
   switch (contentType) {
     case 'multipart/form-data':
@@ -489,20 +432,20 @@ export function psTree(pid: number): Promise<number[]> {
 
 export async function killTask(pid: number) {
   const pids = await psTree(pid);
-  // SIGINT 2 程序终止(interrupt)信号，不会打印额外信息
+
   if (pids.length) {
     try {
-      [pid, ...pids].forEach((x) => {
-        process.kill(x, 2);
+      [pid, ...pids].reverse().forEach((x) => {
+        process.kill(x, 15);
       });
-    } catch (error) { }
+    } catch (error) {}
   } else {
     process.kill(pid, 2);
   }
 }
 
-export async function getPid(name: string) {
-  const taskCommand = `ps -eo pid,command | grep "${name}" | grep -v grep | awk '{print $1}' | head -1 | xargs echo -n`;
+export async function getPid(cmd: string) {
+  const taskCommand = `ps -eo pid,command | grep "${cmd}" | grep -v grep | awk '{print $1}' | head -1 | xargs echo -n`;
   const pid = await promiseExec(taskCommand);
   return pid ? Number(pid) : undefined;
 }
@@ -515,18 +458,18 @@ interface IVersion {
 }
 
 export async function parseVersion(path: string): Promise<IVersion> {
-  return load(await promisify(fs.readFile)(path, 'utf8')) as IVersion;
+  return load(await fs.readFile(path, 'utf8')) as IVersion;
 }
 
 export async function parseContentVersion(content: string): Promise<IVersion> {
   return load(content) as IVersion;
 }
 
-export async function getUniqPath(command: string): Promise<string> {
-  const idStr = `cat ${config.crontabFile} | grep -E "${command}" | perl -pe "s|.*ID=(.*) ${command}.*|\\1|" | head -1 | awk -F " " '{print $1}' | xargs echo -n`;
-  let id = await promiseExec(idStr);
-
-  if (/^\d\d*\d$/.test(id)) {
+export async function getUniqPath(
+  command: string,
+  id: string,
+): Promise<string> {
+  if (/^\d+$/.test(id)) {
     id = `_${id}`;
   } else {
     id = '';
@@ -557,4 +500,28 @@ export async function getUniqPath(command: string): Promise<string> {
   }
 
   return `${str}${id}`;
+}
+
+export function safeJSONParse(value?: string) {
+  if (!value) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch (error) {
+    Logger.error('[JSON.parse失败]', error);
+    return {};
+  }
+}
+
+export async function rmPath(path: string) {
+  try {
+    const _exsit = await fileExist(path);
+    if (_exsit) {
+      await fs.rm(path, { force: true, recursive: true, maxRetries: 5 });
+    }
+  } catch (error) {
+    Logger.error('[rmPath失败]', error);
+  }
 }

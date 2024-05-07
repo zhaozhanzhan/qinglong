@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { Typography, Table, Tag, Button, Spin, message } from 'antd';
 import { request } from '@/utils/http';
 import config from '@/utils/config';
+import dayjs from 'dayjs';
 
 const { Text, Link } = Typography;
 
@@ -19,7 +20,7 @@ enum LoginStatusColor {
 const columns = [
   {
     title: intl.get('序号'),
-    width: 40,
+    width: 50,
     render: (text: string, record: any, index: number) => {
       return index + 1;
     },
@@ -30,7 +31,7 @@ const columns = [
     key: 'timestamp',
     width: 120,
     render: (text: string, record: any) => {
-      return new Date(record.timestamp).toLocaleString();
+      return dayjs(record.timestamp).format('YYYY-MM-DD HH:mm:ss');
     },
   },
   {
@@ -75,7 +76,7 @@ const LoginLog = ({ data }: any) => {
         dataSource={data}
         rowKey="id"
         size="middle"
-        scroll={{ x: 768 }}
+        scroll={{ x: 1000 }}
         sticky
       />
     </>

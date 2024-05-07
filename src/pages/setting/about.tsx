@@ -7,12 +7,6 @@ import dayjs from 'dayjs';
 
 const { Link } = Typography;
 
-enum TVersion {
-  'develop' = '开发版',
-  'master' = '正式版',
-  'debian' = '正式版'
-}
-
 const About = ({ systemInfo }: { systemInfo: SharedContext['systemInfo'] }) => {
   return (
     <div className={styles.container}>
@@ -30,7 +24,10 @@ const About = ({ systemInfo }: { systemInfo: SharedContext['systemInfo'] }) => {
         </span>
         <Descriptions>
           <Descriptions.Item label={intl.get('版本')} span={3}>
-            {intl.get(TVersion[systemInfo.branch])} v{systemInfo.version}
+            {systemInfo?.branch === 'develop'
+              ? intl.get('开发版')
+              : intl.get('正式版')}{' '}
+            v{systemInfo.version}
           </Descriptions.Item>
           <Descriptions.Item label={intl.get('更新时间')} span={3}>
             {dayjs(systemInfo.publishTime * 1000).format('YYYY-MM-DD HH:mm')}

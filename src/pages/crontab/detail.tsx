@@ -33,6 +33,7 @@ import IconFont from '@/components/iconfont';
 import { getCommandScript, getEditorMode } from '@/utils';
 import VirtualList from 'rc-virtual-list';
 import useScrollHeight from '@/hooks/useScrollHeight';
+import dayjs from 'dayjs';
 
 const { Text } = Typography;
 
@@ -51,8 +52,6 @@ interface LogItem {
   directory: string;
   filename: string;
 }
-
-const language = navigator.language || navigator.languages[0];
 
 const CronDetailModal = ({
   cron = {},
@@ -108,10 +107,9 @@ const CronDetailModal = ({
         value={value}
         options={{
           fontSize: 12,
+          minimap: { enabled: false },
           lineNumbersMinChars: 3,
-          fontFamily: 'Source Code Pro',
           glyphMargin: false,
-          wordWrap: 'on',
         }}
         onMount={(editor, monaco) => {
           editorRef.current = editor;
@@ -121,20 +119,17 @@ const CronDetailModal = ({
   };
 
   const onClickItem = (item: LogItem) => {
-    localStorage.setItem('logCron', currentCron.id);
-    setLogUrl(
-      `${config.apiPrefix}logs/${item.filename}?path=${item.directory || ''}`,
-    );
-    request
-      .get(
-        `${config.apiPrefix}logs/${item.filename}?path=${item.directory || ''}`,
-      )
-      .then(({ code, data }) => {
-        if (code === 200) {
-          setLog(data);
-          setIsLogModalVisible(true);
-        }
-      });
+    const url = `${config.apiPrefix}logs/detail?file=${item.filename}&path=${
+      item.directory || ''
+    }`;
+    localStorage.setItem('logCron', url);
+    setLogUrl(url);
+    request.get(url).then(({ code, data }) => {
+      if (code === 200) {
+        setLog(data);
+        setIsLogModalVisible(true);
+      }
+    });
   };
 
   const onTabChange = (key: string) => {
@@ -160,7 +155,7 @@ const CronDetailModal = ({
       const [s, p] = result;
       setScriptInfo({ parent: p, filename: s });
       request
-        .get(`${config.apiPrefix}scripts/${s}?path=${p || ''}`)
+        .get(`${config.apiPrefix}scripts/detail?file=${s}&path=${p || ''}`)
         .then(({ code, data }) => {
           if (code === 200) {
             setValue(data);
@@ -178,8 +173,9 @@ const CronDetailModal = ({
         <>
           {intl.get('确认保存文件')}
           <Text style={{ wordBreak: 'break-all' }} type="warning">
+            {' '}
             {scriptInfo.filename}
-          </Text>{' '}
+          </Text>
           {intl.get('，保存后不可恢复')}
         </>
       ),
@@ -362,8 +358,13 @@ const CronDetailModal = ({
     <Modal
       title={
         <div className="crontab-title-wrapper">
-          <div>
-            <span>{currentCron.name}</span>
+          <div style={{ minWidth: 0 }}>
+            <Typography.Text
+              style={{ width: '100%' }}
+              ellipsis={{ tooltip: currentCron.name }}
+            >
+              {currentCron.name}
+            </Typography.Text>
             {currentCron.labels?.length > 0 && currentCron.labels[0] !== '' && (
               <Divider type="vertical"></Divider>
             )}
@@ -498,7 +499,12 @@ const CronDetailModal = ({
           </div>
           <div className="cron-detail-info-item">
             <div className="cron-detail-info-title">{intl.get('定时')}</div>
-            <div className="cron-detail-info-value">{currentCron.schedule}</div>
+            <div className="cron-detail-info-value">
+              <div>{currentCron.schedule}</div>
+              {currentCron.extra_schedules?.map((x) => (
+                <div key={x.schedule}>{x.schedule}</div>
+              ))}
+            </div>
           </div>
           <div className="cron-detail-info-item">
             <div className="cron-detail-info-title">
@@ -506,11 +512,9 @@ const CronDetailModal = ({
             </div>
             <div className="cron-detail-info-value">
               {currentCron.last_execution_time
-                ? new Date(currentCron.last_execution_time * 1000)
-                    .toLocaleString(language, {
-                      hour12: false,
-                    })
-                    .replace(' 24:', ' 00:')
+                ? dayjs(currentCron.last_execution_time * 1000).format(
+                    'YYYY-MM-DD HH:mm:ss',
+                  )
                 : '-'}
             </div>
           </div>
@@ -530,11 +534,7 @@ const CronDetailModal = ({
             </div>
             <div className="cron-detail-info-value">
               {currentCron.nextRunTime &&
-                currentCron.nextRunTime
-                  .toLocaleString(language, {
-                    hour12: false,
-                  })
-                  .replace(' 24:', ' 00:')}
+                dayjs(currentCron.nextRunTime).format('YYYY-MM-DD HH:mm:ss')}
             </div>
           </div>
         </Card>

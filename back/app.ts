@@ -2,7 +2,6 @@ import 'reflect-metadata'; // We need this in order to use @Decorators
 import config from './config';
 import express from 'express';
 import Logger from './loaders/logger';
-import path from 'path';
 
 async function startServer() {
   const app = express();
@@ -18,10 +17,12 @@ async function startServer() {
   const server = app
     .listen(config.port, () => {
       Logger.debug(`✌️ 后端服务启动成功！`);
+      console.debug(`✌️ 后端服务启动成功！`);
       process.send?.('ready');
     })
     .on('error', (err) => {
       Logger.error(err);
+      console.error(err);
       process.exit(1);
     });
 

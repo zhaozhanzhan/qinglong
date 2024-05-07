@@ -5,9 +5,9 @@ dir_shell=$QL_DIR/shell
 . $dir_shell/share.sh
 . $dir_shell/api.sh
 
-trap "single_hanle" 2 3 20 15 14
+trap "single_hanle" 2 3 20 15 14 19 1
 single_hanle() {
-  eval handle_task_after "$@" "$cmd"
+  eval handle_task_end "$@" "$cmd"
   exit 1
 }
 
@@ -69,11 +69,11 @@ handle_log_path() {
   if [[ $real_log_path ]]; then
     log_path="$real_log_path"
   fi
-  
-  cmd=">> $dir_log/$log_path 2>&1"
+
+  cmd="2>&1 | tee -a $dir_log/$log_path"
   make_dir "$dir_log/$log_dir"
-  if [[ "$show_log" == "true" ]]; then
-    cmd="2>&1 | tee -a $dir_log/$log_path"
+  if [[ "$no_tee" == "true" ]]; then
+    cmd=">> $dir_log/$log_path 2>&1"
   fi
 
   if [[ "$real_time" == "true" ]]; then
@@ -95,6 +95,21 @@ format_params() {
     fi
   fi
   # params=$(echo "$@" | sed -E 's/([^ ])&([^ ])/\1\\\&\2/g')
+
+  # 分割 task 内置参数和脚本参数
+  task_shell_params=()
+  script_params=()
+  found_double_dash=false
+
+  for arg in "$@"; do
+    if $found_double_dash; then
+      script_params+=("$arg")
+    elif [ "$arg" == "--" ]; then
+      found_double_dash=true
+    else
+      task_shell_params+=("$arg")
+    fi
+  done
 }
 
 init_begin_time() {
@@ -119,11 +134,9 @@ if [[ $max_time ]]; then
 fi
 
 format_params "$@"
-define_program "$@"
-handle_log_path "$@"
+define_program "${task_shell_params[@]}"
+handle_log_path "${task_shell_params[@]}"
 init_begin_time
 
 eval . $dir_shell/otask.sh "$cmd"
-[[ -f "$dir_log/$log_path" ]] && [[ ! $show_log ]] && [[ "$real_time" != "true" ]] && cat "$dir_log/$log_path"
-
 exit 0

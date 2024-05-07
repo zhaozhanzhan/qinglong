@@ -1,13 +1,12 @@
 import { Service, Inject } from 'typedi';
 import winston from 'winston';
-import fs from 'fs';
-import path from 'path';
+import path, { join } from 'path';
 import SockService from './sock';
 import CronService from './cron';
 import ScheduleService, { TaskCallbacks } from './schedule';
 import config from '../config';
 import { TASK_COMMAND } from '../config/const';
-import { getPid, killTask } from '../config/util';
+import { getFileContentByName, getPid, killTask, rmPath } from '../config/util';
 
 @Service()
 export default class ScriptService {
@@ -21,9 +20,7 @@ export default class ScriptService {
   private taskCallbacks(filePath: string): TaskCallbacks {
     return {
       onEnd: async (cp, endTime, diff) => {
-        try {
-          fs.unlinkSync(filePath);
-        } catch (error) {}
+        await rmPath(filePath);
       },
       onError: async (message: string) => {
         this.sockService.sendMessage({
@@ -42,10 +39,11 @@ export default class ScriptService {
 
   public async runScript(filePath: string) {
     const relativePath = path.relative(config.scriptPath, filePath);
-    const command = `${TASK_COMMAND} -l ${relativePath} now`;
+    const command = `${TASK_COMMAND} ${relativePath} now`;
     const pid = await this.scheduleService.runTask(
       command,
       this.taskCallbacks(filePath),
+      { command },
       'start',
     );
 
@@ -53,15 +51,20 @@ export default class ScriptService {
   }
 
   public async stopScript(filePath: string, pid: number) {
-    let str = '';
     if (!pid) {
       const relativePath = path.relative(config.scriptPath, filePath);
-      pid = await getPid(`${TASK_COMMAND} -l ${relativePath} now`);
+      pid = (await getPid(`${TASK_COMMAND} ${relativePath} now`)) as number;
     }
     try {
       await killTask(pid);
     } catch (error) {}
 
     return { code: 200 };
+  }
+
+  public async getFile(filePath: string, fileName: string) {
+    const _filePath = join(config.scriptPath, filePath, fileName);
+    const content = await getFileContentByName(_filePath);
+    return content;
   }
 }

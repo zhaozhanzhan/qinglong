@@ -86,10 +86,15 @@ check_server() {
   fi
 }
 
+env_str_to_array() {
+  local IFS="&"
+  read -ra array <<<"${!env_param}"
+}
+
 ## 正常运行单个脚本，$1：传入参数
 run_normal() {
   local file_param=$1
-  if [[ $# -eq 1 ]] && [[ "$real_time" != "true" ]]; then
+  if [[ $# -eq 1 ]] && [[ "$real_time" != "true" ]] && [[ "$no_delay" != "true" ]]; then
     random_delay "$file_param"
   fi
 
@@ -100,7 +105,7 @@ run_normal() {
     file_param=${file_param/$relative_path\//}
   fi
 
-  $timeoutCmd $which_program $file_param
+  $timeoutCmd $which_program $file_param "${script_params[@]}"
 }
 
 ## 并发执行时，设定的 RandomDelay 不会生效，即所有任务立即执行
@@ -113,8 +118,7 @@ run_concurrent() {
     exit 1
   fi
 
-  local envs=$(eval echo "\$${env_param}")
-  local array=($(echo $envs | sed 's/&/ /g'))
+  env_str_to_array
   local tempArr=$(echo $num_param | sed "s/-max/-${#array[@]}/g" | sed "s/max-/${#array[@]}-/g" | perl -pe "s|(\d+)(-\|~\|_)(\d+)|{\1..\3}|g")
   local runArr=($(eval echo $tempArr))
   runArr=($(awk -v RS=' ' '!a[$1]++' <<<${runArr[@]}))
@@ -125,11 +129,13 @@ run_concurrent() {
     let n++
   done
 
-  local cookieStr=$(echo ${array_run[*]} | sed 's/\ /\&/g')
-  [[ ! -z $cookieStr ]] && export ${env_param}=${cookieStr}
+  local cookieStr=$(
+    IFS="&"
+    echo "${array_run[*]}"
+  )
+  [[ ! -z $cookieStr ]] && export "${env_param}=${cookieStr}"
 
-  local envs=$(eval echo "\$${env_param}")
-  local array=($(echo $envs | sed 's/&/ /g'))
+  env_str_to_array
   single_log_time=$(date "+%Y-%m-%d-%H-%M-%S.%3N")
 
   cd $dir_scripts
@@ -139,9 +145,9 @@ run_concurrent() {
     file_param=${file_param/$relative_path\//}
   fi
   for i in "${!array[@]}"; do
-    export ${env_param}=${array[i]}
+    export "${env_param}=${array[i]}"
     single_log_path="$dir_log/$log_dir/${single_log_time}_$((i + 1)).log"
-    eval $timeoutCmd $which_program $file_param &>$single_log_path &
+    eval $timeoutCmd $which_program $file_param "${script_params[@]}" &>$single_log_path &
   done
 
   wait
@@ -161,8 +167,7 @@ run_designated() {
     exit 1
   fi
 
-  local envs=$(eval echo "\$${env_param}")
-  local array=($(echo $envs | sed 's/&/ /g'))
+  env_str_to_array
   local tempArr=$(echo $num_param | sed "s/-max/-${#array[@]}/g" | sed "s/max-/${#array[@]}-/g" | perl -pe "s|(\d+)(-\|~\|_)(\d+)|{\1..\3}|g")
   local runArr=($(eval echo $tempArr))
   runArr=($(awk -v RS=' ' '!a[$1]++' <<<${runArr[@]}))
@@ -173,8 +178,11 @@ run_designated() {
     let n++
   done
 
-  local cookieStr=$(echo ${array_run[*]} | sed 's/\ /\&/g')
-  [[ ! -z $cookieStr ]] && export ${env_param}=${cookieStr}
+  local cookieStr=$(
+    IFS="&"
+    echo "${array_run[*]}"
+  )
+  [[ ! -z $cookieStr ]] && export "${env_param}=${cookieStr}"
 
   cd $dir_scripts
   local relative_path="${file_param%/*}"
@@ -182,7 +190,7 @@ run_designated() {
     cd ${relative_path}
     file_param=${file_param/$relative_path\//}
   fi
-  $timeoutCmd $which_program $file_param
+  $timeoutCmd $which_program $file_param "${script_params[@]}"
 }
 
 ## 运行其他命令
@@ -233,6 +241,8 @@ main() {
   fi
 }
 
-handle_task_before "$@"
-main "$@"
-handle_task_after "$@"
+handle_task_start "${task_shell_params[@]}"
+run_task_before "${task_shell_params[@]}"
+main "${task_shell_params[@]}"
+run_task_after "${task_shell_params[@]}"
+handle_task_end "${task_shell_params[@]}"

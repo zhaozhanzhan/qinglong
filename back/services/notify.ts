@@ -1,12 +1,12 @@
-import { NotificationInfo } from '../data/notify';
-import { Service, Inject } from 'typedi';
-import winston from 'winston';
-import UserService from './user';
-import got from 'got';
-import nodemailer from 'nodemailer';
 import crypto from 'crypto';
+import got from 'got';
 import { HttpProxyAgent, HttpsProxyAgent } from 'hpagent';
+import nodemailer from 'nodemailer';
+import { Inject, Service } from 'typedi';
+import winston from 'winston';
 import { parseBody, parseHeaders } from '../config/util';
+import { NotificationInfo } from '../data/notify';
+import UserService from './user';
 
 @Service()
 export default class NotificationService {
@@ -31,6 +31,7 @@ export default class NotificationService {
     ['pushMe', this.pushMe],
     ['webhook', this.webhook],
     ['lark', this.lark],
+    ['chronocat', this.chronocat],
   ]);
 
   private title = '';
@@ -56,7 +57,7 @@ export default class NotificationService {
       try {
         return await notificationModeAction?.call(this);
       } catch (error: any) {
-        return false;
+        throw error;
       }
     }
     return false;
@@ -195,7 +196,15 @@ export default class NotificationService {
   }
 
   private async bark() {
-    let { barkPush, barkIcon, barkSound, barkGroup } = this.params;
+    let {
+      barkPush,
+      barkIcon = '',
+      barkSound = '',
+      barkGroup = '',
+      barkLevel = '',
+      barkUrl = '',
+      barkArchive = '',
+    } = this.params;
     if (!barkPush.startsWith('http')) {
       barkPush = `https://api.day.app/${barkPush}`;
     }
@@ -203,8 +212,7 @@ export default class NotificationService {
       this.title,
     )}/${encodeURIComponent(
       this.content,
-    )}?icon=${barkIcon}&sound=${barkSound}&group=${barkGroup}`;
-
+    )}?icon=${barkIcon}&sound=${barkSound}&group=${barkGroup}&level=${barkLevel}&url=${barkUrl}&isArchive=${barkArchive}`;
     try {
       const res: any = await got
         .get(url, {
@@ -232,8 +240,8 @@ export default class NotificationService {
       telegramBotUserId,
     } = this.params;
     const authStr = telegramBotProxyAuth ? `${telegramBotProxyAuth}@` : '';
-    const url = `https://${
-      telegramBotApiHost ? telegramBotApiHost : 'api.telegram.org'
+    const url = `${
+      telegramBotApiHost ? telegramBotApiHost : 'https://api.telegram.org'
     }/bot${telegramBotToken}/sendMessage`;
     let agent;
     if (telegramBotProxyHost && telegramBotProxyPort) {
@@ -523,7 +531,7 @@ export default class NotificationService {
           headers: { 'Content-Type': 'application/json' },
         })
         .json();
-      if (res.StatusCode === 0) {
+      if (res.StatusCode === 0 || res.code === 0) {
         return true;
       } else {
         throw new Error(JSON.stringify(res));
@@ -560,7 +568,7 @@ export default class NotificationService {
         throw new Error(JSON.stringify(info));
       }
     } catch (error: any) {
-      throw new Error(error.response ? error.response.body : error);
+      throw error;
     }
   }
 
@@ -588,6 +596,63 @@ export default class NotificationService {
     }
   }
 
+  private async chronocat() {
+    const { chronocatURL, chronocatQQ, chronocatToken } = this.params;
+    try {
+      const user_ids = chronocatQQ
+        .match(/user_id=(\d+)/g)
+        ?.map((match: any) => match.split('=')[1]);
+      const group_ids = chronocatQQ
+        .match(/group_id=(\d+)/g)
+        ?.map((match: any) => match.split('=')[1]);
+
+      const url = `${chronocatURL}/api/message/send`;
+      const headers = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${chronocatToken}`,
+      };
+
+      for (const [chat_type, ids] of [
+        [1, user_ids],
+        [2, group_ids],
+      ]) {
+        if (!ids) {
+          continue;
+        }
+        let _ids: any = ids;
+        for (const chat_id of _ids) {
+          const data = {
+            peer: {
+              chatType: chat_type,
+              peerUin: chat_id,
+            },
+            elements: [
+              {
+                elementType: 1,
+                textElement: {
+                  content: `${this.title}\n\n${this.content}`,
+                },
+              },
+            ],
+          };
+          const res: any = await got.post(url, {
+            ...this.gotOption,
+            json: data,
+            headers,
+          });
+          if (res.statusCode === 200) {
+            return true;
+          } else {
+            throw new Error(res.body);
+          }
+        }
+      }
+      return false;
+    } catch (error: any) {
+      throw new Error(error.response ? error.response.body : error);
+    }
+  }
+
   private async webhook() {
     const {
       webhookUrl,
@@ -597,15 +662,14 @@ export default class NotificationService {
       webhookContentType,
     } = this.params;
 
-    const { formatBody, formatUrl } = this.formatNotifyContent(
-      webhookUrl,
-      webhookBody,
-    );
-    if (!formatUrl && !formatBody) {
-      return false;
+    if (!webhookUrl.includes('$title') && !webhookBody.includes('$title')) {
+      throw new Error('Url 或者 Body 中必须包含 $title');
     }
+
     const headers = parseHeaders(webhookHeaders);
-    const body = parseBody(formatBody, webhookContentType);
+    const body = parseBody(webhookBody, webhookContentType, (v) =>
+      v?.replaceAll('$title', this.title)?.replaceAll('$content', this.content),
+    );
     const bodyParam = this.formatBody(webhookContentType, body);
     const options = {
       method: webhookMethod,
@@ -615,6 +679,9 @@ export default class NotificationService {
       ...bodyParam,
     };
     try {
+      const formatUrl = webhookUrl
+        ?.replaceAll('$title', encodeURIComponent(this.title))
+        ?.replaceAll('$content', encodeURIComponent(this.content));
       const res = await got(formatUrl, options);
       if (String(res.statusCode).startsWith('20')) {
         return true;
@@ -634,23 +701,9 @@ export default class NotificationService {
       case 'multipart/form-data':
         return { form: body };
       case 'application/x-www-form-urlencoded':
+      case 'text/plain':
         return { body };
     }
     return {};
-  }
-
-  private formatNotifyContent(url: string, body: string) {
-    if (!url.includes('$title') && !body.includes('$title')) {
-      return {};
-    }
-
-    return {
-      formatUrl: url
-        ?.replaceAll('$title', encodeURIComponent(this.title))
-        ?.replaceAll('$content', encodeURIComponent(this.content)),
-      formatBody: body
-        ?.replaceAll('$title', this.title)
-        ?.replaceAll('$content', this.content),
-    };
   }
 }

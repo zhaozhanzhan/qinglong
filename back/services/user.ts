@@ -5,24 +5,28 @@ import {
   fileExist,
   getNetIp,
   getPlatform,
+  safeJSONParse,
 } from '../config/util';
 import config from '../config';
-import * as fs from 'fs';
+import * as fs from 'fs/promises';
 import jwt from 'jsonwebtoken';
 import { authenticator } from '@otplib/preset-default';
 import {
   AuthDataType,
   AuthInfo,
-  AuthModel,
-  AuthModelInfo,
+  SystemModel,
+  SystemModelInfo,
   LoginStatus,
-} from '../data/auth';
+} from '../data/system';
 import { NotificationInfo } from '../data/notify';
 import NotificationService from './notify';
 import { Request } from 'express';
 import ScheduleService from './schedule';
 import SockService from './sock';
 import dayjs from 'dayjs';
+import IP2Region from 'ip2region';
+import requestIp from 'request-ip';
+import uniq from 'lodash/uniq';
 
 @Service()
 export default class UserService {
@@ -43,12 +47,13 @@ export default class UserService {
     req: Request,
     needTwoFactor = true,
   ): Promise<any> {
-    if (!fs.existsSync(config.authConfigFile)) {
+    const _exist = await fileExist(config.authConfigFile);
+    if (!_exist) {
       return this.initAuthInfo();
     }
 
     let { username, password } = payloads;
-    const content = this.getAuthInfo();
+    const content = await this.getAuthInfo();
     const timestamp = Date.now();
     if (content) {
       let {
@@ -101,7 +106,16 @@ export default class UserService {
         };
       }
 
-      const { ip, address } = await getNetIp(req);
+      const ip = requestIp.getClientIp(req) || '';
+      const query = new IP2Region();
+      const ipAddress = query.search(ip);
+      let address = '';
+      if (ipAddress) {
+        const { country, province, city, isp } = ipAddress;
+        address = uniq([country, province, city, isp])
+          .filter(Boolean)
+          .join(' ');
+      }
       if (username === cUsername && password === cPassword) {
         const data = createRandomString(50, 100);
         const expiration = twoFactorActivated ? 60 : 20;
@@ -123,13 +137,12 @@ export default class UserService {
           platform: req.platform,
           isTwoFactorChecking: false,
         });
-        await this.notificationService.notify(
+        this.notificationService.notify(
           '登录通知',
           `你于${dayjs(timestamp).format('YYYY-MM-DD HH:mm:ss')}在 ${address} ${
             req.platform
           }端 登录成功，ip地址 ${ip}`,
         );
-        await this.getLoginLog();
         await this.insertDb({
           type: AuthDataType.loginLog,
           info: {
@@ -152,13 +165,12 @@ export default class UserService {
           lastaddr: address,
           platform: req.platform,
         });
-        await this.notificationService.notify(
+        this.notificationService.notify(
           '登录通知',
           `你于${dayjs(timestamp).format('YYYY-MM-DD HH:mm:ss')}在 ${address} ${
             req.platform
           }端 登录失败，ip地址 ${ip}`,
         );
-        await this.getLoginLog();
         await this.insertDb({
           type: AuthDataType.loginLog,
           info: {
@@ -186,15 +198,15 @@ export default class UserService {
   }
 
   public async logout(platform: string): Promise<any> {
-    const authInfo = this.getAuthInfo();
+    const authInfo = await this.getAuthInfo();
     this.updateAuthInfo(authInfo, {
       token: '',
       tokens: { ...authInfo.tokens, [platform]: '' },
     });
   }
 
-  public async getLoginLog(): Promise<Array<AuthModelInfo | undefined>> {
-    const docs = await AuthModel.findAll({
+  public async getLoginLog(): Promise<Array<SystemModelInfo | undefined>> {
+    const docs = await SystemModel.findAll({
       where: { type: AuthDataType.loginLog },
     });
     if (docs && docs.length > 0) {
@@ -202,7 +214,7 @@ export default class UserService {
         (a, b) => b.info!.timestamp! - a.info!.timestamp!,
       );
       if (result.length > 100) {
-        await AuthModel.destroy({
+        await SystemModel.destroy({
           where: { id: result[result.length - 1].id },
         });
       }
@@ -212,12 +224,12 @@ export default class UserService {
   }
 
   private async insertDb(payload: AuthInfo): Promise<AuthInfo> {
-    const doc = await AuthModel.create({ ...payload }, { returning: true });
+    const doc = await SystemModel.create({ ...payload }, { returning: true });
     return doc;
   }
 
-  private initAuthInfo() {
-    fs.writeFileSync(
+  private async initAuthInfo() {
+    await fs.writeFile(
       config.authConfigFile,
       JSON.stringify({
         username: 'admin',
@@ -240,13 +252,13 @@ export default class UserService {
     if (password === 'admin') {
       return { code: 400, message: '密码不能设置为admin' };
     }
-    const authInfo = this.getAuthInfo();
+    const authInfo = await this.getAuthInfo();
     this.updateAuthInfo(authInfo, { username, password });
     return { code: 200, message: '更新成功' };
   }
 
   public async updateAvatar(avatar: string) {
-    const authInfo = this.getAuthInfo();
+    const authInfo = await this.getAuthInfo();
     this.updateAuthInfo(authInfo, { avatar });
     return { code: 200, data: avatar, message: '更新成功' };
   }
@@ -254,7 +266,7 @@ export default class UserService {
   public async getUserInfo(): Promise<any> {
     const authFileExist = await fileExist(config.authConfigFile);
     if (!authFileExist) {
-      fs.writeFileSync(
+      await fs.writeFile(
         config.authConfigFile,
         JSON.stringify({
           username: 'admin',
@@ -262,19 +274,19 @@ export default class UserService {
         }),
       );
     }
-    return this.getAuthInfo();
+    return await this.getAuthInfo();
   }
 
-  public initTwoFactor() {
+  public async initTwoFactor() {
     const secret = authenticator.generateSecret();
-    const authInfo = this.getAuthInfo();
+    const authInfo = await this.getAuthInfo();
     const otpauth = authenticator.keyuri(authInfo.username, 'qinglong', secret);
     this.updateAuthInfo(authInfo, { twoFactorSecret: secret });
     return { secret, url: otpauth };
   }
 
-  public activeTwoFactor(code: string) {
-    const authInfo = this.getAuthInfo();
+  public async activeTwoFactor(code: string) {
+    const authInfo = await this.getAuthInfo();
     const isValid = authenticator.verify({
       token: code,
       secret: authInfo.twoFactorSecret,
@@ -293,7 +305,7 @@ export default class UserService {
     }: { username: string; password: string; code: string },
     req: any,
   ) {
-    const authInfo = this.getAuthInfo();
+    const authInfo = await this.getAuthInfo();
     const { isTwoFactorChecking, twoFactorSecret } = authInfo;
     if (!isTwoFactorChecking) {
       return { code: 450, message: '未知错误' };
@@ -315,8 +327,8 @@ export default class UserService {
     }
   }
 
-  public deactiveTwoFactor() {
-    const authInfo = this.getAuthInfo();
+  public async deactiveTwoFactor() {
+    const authInfo = await this.getAuthInfo();
     this.updateAuthInfo(authInfo, {
       twoFactorActivated: false,
       twoFactorActived: false,
@@ -325,13 +337,13 @@ export default class UserService {
     return true;
   }
 
-  private getAuthInfo() {
-    const content = fs.readFileSync(config.authConfigFile, 'utf8');
-    return JSON.parse(content || '{}');
+  private async getAuthInfo() {
+    const content = await fs.readFile(config.authConfigFile, 'utf8');
+    return safeJSONParse(content);
   }
 
-  private updateAuthInfo(authInfo: any, info: any) {
-    fs.writeFileSync(
+  private async updateAuthInfo(authInfo: any, info: any) {
+    await fs.writeFile(
       config.authConfigFile,
       JSON.stringify({ ...authInfo, ...info }),
     );
@@ -343,21 +355,21 @@ export default class UserService {
   }
 
   private async updateAuthDb(payload: AuthInfo): Promise<any> {
-    let doc = await AuthModel.findOne({ type: payload.type });
+    let doc = await SystemModel.findOne({ type: payload.type });
     if (doc) {
-      const updateResult = await AuthModel.update(payload, {
+      const updateResult = await SystemModel.update(payload, {
         where: { id: doc.id },
         returning: true,
       });
       doc = updateResult[1][0];
     } else {
-      doc = await AuthModel.create(payload, { returning: true });
+      doc = await SystemModel.create(payload, { returning: true });
     }
     return doc;
   }
 
   public async getDb(query: any): Promise<any> {
-    const doc: any = await AuthModel.findOne({ where: { ...query } });
+    const doc: any = await SystemModel.findOne({ where: { ...query } });
     return doc && (doc.get({ plain: true }) as any);
   }
 

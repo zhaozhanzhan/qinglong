@@ -9,9 +9,6 @@ reset_env() {
   npm_install_2 $dir_root
   echo -e "---> 青龙依赖安装完成\n"
 
-  echo -e "---> 3. 开始安装脚本依赖\n"
-  cp -f $dir_sample/package.json $dir_scripts/package.json
-  npm_install_2 $dir_scripts
   echo -e "---> 脚本依赖安装完成\n"
 }
 
@@ -76,23 +73,15 @@ check_pm2() {
 
 main() {
   echo -e "=====> 开始检测"
-  npm i -g pnpm@8.3.1
+  npm i -g pnpm@8.3.1 pm2 tsx
   patch_version
 
-  if [[ $PipMirror ]]; then
-    pip3 config set global.index-url $PipMirror
-  fi
-  if [[ $NpmMirror ]]; then
-    cd && pnpm config set registry $NpmMirror
-    pnpm install -g
-  fi
-
-  pnpm add -g pm2 tsx
   reset_env
   copy_dep
   check_ql
   check_nginx
   check_pm2
+  reload_update
   reload_pm2
   echo -e "\n=====> 检测结束\n"
 }

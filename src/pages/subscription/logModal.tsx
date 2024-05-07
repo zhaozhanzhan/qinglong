@@ -9,6 +9,7 @@ import {
 } from '@ant-design/icons';
 import { PageLoading } from '@ant-design/pro-layout';
 import { logEnded } from '@/utils';
+import Ansi from 'ansi-to-react';
 
 const SubscriptionLogModal = ({
   subscription,
@@ -108,22 +109,24 @@ const SubscriptionLogModal = ({
         </Button>,
       ]}
     >
-      {loading ? (
-        <PageLoading />
-      ) : (
-        <pre
-          style={
-            isPhone
-              ? {
-                  fontFamily: 'Source Code Pro',
-                  zoom: 0.83,
-                }
-              : {}
-          }
-        >
-          {value}
-        </pre>
-      )}
+      <div className="log-container">
+        {loading ? (
+          <PageLoading />
+        ) : (
+          <pre
+            style={
+              isPhone
+                ? {
+                    fontFamily: 'Source Code Pro',
+                    zoom: 0.83,
+                  }
+                : {}
+            }
+          >
+            <Ansi>{value}</Ansi>
+          </pre>
+        )}
+      </div>
     </Modal>
   );
 };

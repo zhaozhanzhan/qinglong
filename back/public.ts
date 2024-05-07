@@ -6,8 +6,9 @@ import { credentials } from '@grpc/grpc-js';
 
 const app = express();
 const client = new HealthClient(
-  `localhost:${config.cronPort}`,
+  `0.0.0.0:${config.cronPort}`,
   credentials.createInsecure(),
+  { 'grpc.enable_http_proxy': 0 },
 );
 
 app.get('/api/health', (req, res) => {
@@ -25,9 +26,11 @@ app
     await require('./loaders/db').default();
 
     Logger.debug(`✌️ 公共服务启动成功！`);
+    console.debug(`✌️ 公共服务启动成功！`);
     process.send?.('ready');
   })
   .on('error', (err) => {
     Logger.error(err);
+    console.error(err);
     process.exit(1);
   });

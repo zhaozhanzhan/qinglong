@@ -18,6 +18,9 @@ export class Crontab {
   last_running_time?: number;
   last_execution_time?: number;
   sub_id?: number;
+  extra_schedules?: Array<{ schedule: string }>;
+  task_before?: string;
+  task_after?: string;
 
   constructor(options: Crontab) {
     this.name = options.name;
@@ -39,6 +42,9 @@ export class Crontab {
     this.last_running_time = options.last_running_time || 0;
     this.last_execution_time = options.last_execution_time || 0;
     this.sub_id = options.sub_id;
+    this.extra_schedules = options.extra_schedules;
+    this.task_before = options.task_before;
+    this.task_after = options.task_after;
   }
 }
 
@@ -49,7 +55,7 @@ export enum CrontabStatus {
   'disabled',
 }
 
-export interface CronInstance extends Model<Crontab, Crontab>, Crontab {}
+export interface CronInstance extends Model<Crontab, Crontab>, Crontab { }
 export const CrontabModel = sequelize.define<CronInstance>('Crontab', {
   name: {
     unique: 'compositeIndex',
@@ -75,4 +81,7 @@ export const CrontabModel = sequelize.define<CronInstance>('Crontab', {
   last_running_time: DataTypes.NUMBER,
   last_execution_time: DataTypes.NUMBER,
   sub_id: { type: DataTypes.NUMBER, allowNull: true },
+  extra_schedules: DataTypes.JSON,
+  task_before: DataTypes.STRING,
+  task_after: DataTypes.STRING,
 });

@@ -43,7 +43,6 @@ import { request } from '@/utils/http';
 import CronModal, { CronLabelModal } from './modal';
 import CronLogModal from './logModal';
 import CronDetailModal from './detail';
-import cron_parser from 'cron-parser';
 import { diffTime } from '@/utils/date';
 import { history, useOutletContext } from '@umijs/max';
 import './index.less';
@@ -52,13 +51,14 @@ import ViewManageModal from './viewManageModal';
 import { FilterValue, SorterResult } from 'antd/lib/table/interface';
 import { SharedContext } from '@/layouts';
 import useTableScrollHeight from '@/hooks/useTableScrollHeight';
-import { getCommandScript, parseCrontab } from '@/utils';
+import { getCommandScript, getCrontabsNextDate, parseCrontab } from '@/utils';
 import { ColumnProps } from 'antd/lib/table';
 import { useVT } from 'virtualizedtableforantd4';
 import { ICrontab, OperationName, OperationPath, CrontabStatus } from './type';
 import Name from '@/components/name';
+import dayjs from 'dayjs';
 
-const { Text, Paragraph } = Typography;
+const { Text, Paragraph, Link } = Typography;
 const { Search } = Input;
 
 const Crontab = () => {
@@ -69,52 +69,25 @@ const Crontab = () => {
       dataIndex: 'name',
       key: 'name',
       fixed: 'left',
-      width: 140,
+      width: 120,
       render: (text: string, record: any) => (
-        <>
-          <a
+        <Paragraph
+          style={{
+            wordBreak: 'break-all',
+            marginBottom: 0,
+            color: '#1890ff'
+          }}
+          ellipsis={{ tooltip: text, rows: 2 }}
+        >
+          <Link
             onClick={() => {
               setDetailCron(record);
               setIsDetailModalVisible(true);
             }}
           >
-            {record.labels?.length > 0 && record.labels[0] !== '' && false ? (
-              <Popover
-                placement="right"
-                trigger={isPhone ? 'click' : 'hover'}
-                content={
-                  <div>
-                    {record.labels?.map((label: string) => (
-                      <Tag
-                        color="blue"
-                        key={label}
-                        style={{ cursor: 'point' }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setSearchValue(`label:${label}`);
-                          setSearchText(`label:${label}`);
-                        }}
-                      >
-                        <a>{label}</a>
-                      </Tag>
-                    ))}
-                  </div>
-                }
-              >
-                {record.name || '-'}
-              </Popover>
-            ) : (
-              record.name || '-'
-            )}
-            {record.isPinned ? (
-              <span>
-                <PushpinOutlined />
-              </span>
-            ) : (
-              ''
-            )}
-          </a>
-        </>
+            {record.name || '-'}
+          </Link>
+        </Paragraph>
       ),
       sorter: {
         compare: (a, b) => a?.name?.localeCompare(b?.name),
@@ -124,7 +97,7 @@ const Crontab = () => {
       title: intl.get('命令/脚本'),
       dataIndex: 'command',
       key: 'command',
-      width: 220,
+      width: 240,
       render: (text, record) => {
         return (
           <Paragraph
@@ -211,6 +184,32 @@ const Crontab = () => {
       sorter: {
         compare: (a, b) => a.schedule.localeCompare(b.schedule),
       },
+      render: (text, record) => {
+        return (
+          <Paragraph
+            style={{
+              wordBreak: 'break-all',
+              marginBottom: 0,
+            }}
+            ellipsis={{
+              tooltip: {
+                placement: 'right',
+                title: (
+                  <>
+                    <div>{text}</div>
+                    {record.extra_schedules?.map((x) => (
+                      <div key={x.schedule}>{x.schedule}</div>
+                    ))}
+                  </>
+                ),
+              },
+              rows: 2,
+            }}
+          >
+            {text}
+          </Paragraph>
+        );
+      },
     },
     {
       title: intl.get('最后运行时长'),
@@ -239,7 +238,6 @@ const Crontab = () => {
         },
       },
       render: (text, record) => {
-        const language = navigator.language || navigator.languages[0];
         return (
           <span
             style={{
@@ -247,11 +245,9 @@ const Crontab = () => {
             }}
           >
             {record.last_execution_time
-              ? new Date(record.last_execution_time * 1000)
-                  .toLocaleString(language, {
-                    hour12: false,
-                  })
-                  .replace(' 24:', ' 00:')
+              ? dayjs(record.last_execution_time * 1000).format(
+                  'YYYY-MM-DD HH:mm:ss',
+                )
               : '-'}
           </span>
         );
@@ -266,12 +262,7 @@ const Crontab = () => {
         },
       },
       render: (text, record) => {
-        const language = navigator.language || navigator.languages[0];
-        return record.nextRunTime
-          .toLocaleString(language, {
-            hour12: false,
-          })
-          .replace(' 24:', ' 00:');
+        return dayjs(record.nextRunTime).format('YYYY-MM-DD HH:mm:ss');
       },
     },
     {
@@ -404,7 +395,7 @@ const Crontab = () => {
             data.map((x) => {
               return {
                 ...x,
-                nextRunTime: parseCrontab(x.schedule),
+                nextRunTime: getCrontabsNextDate(x.schedule, x.extra_schedules),
               };
             }),
           );
@@ -692,7 +683,10 @@ const Crontab = () => {
         if (code === 200) {
           const index = value.findIndex((x) => x.id === cron.id);
           const result = [...value];
-          data.nextRunTime = parseCrontab(data.schedule);
+          data.nextRunTime = getCrontabsNextDate(
+            data.schedule,
+            data.extra_schedules,
+          );
           if (index !== -1) {
             result.splice(index, 1, {
               ...cron,

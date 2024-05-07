@@ -9,7 +9,7 @@ import {
   Input,
   Upload,
   Modal,
-  Progress,
+  Select,
 } from 'antd';
 import * as DarkReader from '@umijs/ssr-darkreader';
 import config from '@/utils/config';
@@ -21,25 +21,24 @@ import './index.less';
 import { UploadOutlined } from '@ant-design/icons';
 import Countdown from 'antd/lib/statistic/Countdown';
 import useProgress from './progress';
+import pick from 'lodash/pick';
+import { disableBody } from '@/utils';
 
-const optionsWithDisabled = [
-  { label: intl.get('亮色'), value: 'light' },
-  { label: intl.get('暗色'), value: 'dark' },
-  { label: intl.get('跟随系统'), value: 'auto' },
-];
+const dataMap = {
+  'log-remove-frequency': 'logRemoveFrequency',
+  'cron-concurrency': 'cronConcurrency',
+};
 
 const Other = ({
   systemInfo,
-  socketMessage,
   reloadTheme,
-}: Pick<SharedContext, 'socketMessage' | 'reloadTheme' | 'systemInfo'>) => {
+}: Pick<SharedContext, 'reloadTheme' | 'systemInfo'>) => {
   const defaultTheme = localStorage.getItem('qinglong_dark_theme') || 'auto';
   const [systemConfig, setSystemConfig] = useState<{
     logRemoveFrequency?: number | null;
     cronConcurrency?: number | null;
   }>();
   const [form] = Form.useForm();
-  const modalRef = useRef<any>();
   const [exportLoading, setExportLoading] = useState(false);
   const showUploadProgress = useProgress(intl.get('上传'));
   const showDownloadProgress = useProgress(intl.get('下载'));
@@ -67,6 +66,13 @@ const Other = ({
     reloadTheme();
   };
 
+  const handleLangChange = (v: string) => {
+    localStorage.setItem('lang', v);
+    setTimeout(() => {
+      window.location.reload();
+    }, 500);
+  };
+
   const getSystemConfig = () => {
     request
       .get(`${config.apiPrefix}system/config`)
@@ -80,9 +86,12 @@ const Other = ({
       });
   };
 
-  const updateSystemConfig = () => {
+  const updateSystemConfig = (path: keyof typeof dataMap) => {
     request
-      .put(`${config.apiPrefix}system/config`, systemConfig)
+      .put(
+        `${config.apiPrefix}system/config/${path}`,
+        pick(systemConfig, dataMap[path]),
+      )
       .then(({ code, data }) => {
         if (code === 200) {
           message.success(intl.get('更新成功'));
@@ -124,11 +133,16 @@ const Other = ({
       maskClosable: false,
       title: intl.get('确认重启'),
       centered: true,
-      content: intl.get('备份数据上传成功，确认覆盖数据'),
+      content: (
+        <>
+          <div>{intl.get('备份数据上传成功，确认覆盖数据')}</div>
+          <div>{intl.get('如果恢复失败，可进入容器执行')} ql reload data</div>
+        </>
+      ),
       okText: intl.get('重启'),
       onOk() {
         request
-          .put(`${config.apiPrefix}system/reload`, { type: 'data' })
+          .put(`${config.apiPrefix}update/data`)
           .then(() => {
             message.success({
               content: (
@@ -144,6 +158,7 @@ const Other = ({
               ),
               duration: 30,
             });
+            disableBody();
             setTimeout(() => {
               window.location.reload();
             }, 30000);
@@ -167,12 +182,27 @@ const Other = ({
         initialValue={defaultTheme}
       >
         <Radio.Group
-          options={optionsWithDisabled}
           onChange={themeChange}
           value={defaultTheme}
           optionType="button"
           buttonStyle="solid"
-        />
+        >
+          <Radio.Button
+            value="light"
+            style={{ width: 70, textAlign: 'center' }}
+          >
+            {intl.get('亮色')}
+          </Radio.Button>
+          <Radio.Button value="dark" style={{ width: 66, textAlign: 'center' }}>
+            {intl.get('暗色')}
+          </Radio.Button>
+          <Radio.Button
+            value="auto"
+            style={{ width: 129, textAlign: 'center' }}
+          >
+            {intl.get('跟随系统')}
+          </Radio.Button>
+        </Radio.Group>
       </Form.Item>
       <Form.Item
         label={intl.get('日志删除频率')}
@@ -190,7 +220,13 @@ const Other = ({
               setSystemConfig({ ...systemConfig, logRemoveFrequency: value });
             }}
           />
-          <Button type="primary" onClick={updateSystemConfig}>
+          <Button
+            type="primary"
+            onClick={() => {
+              updateSystemConfig('log-remove-frequency');
+            }}
+            style={{ width: 84 }}
+          >
             {intl.get('确认')}
           </Button>
         </Input.Group>
@@ -198,17 +234,35 @@ const Other = ({
       <Form.Item label={intl.get('定时任务并发数')} name="frequency">
         <Input.Group compact>
           <InputNumber
-            style={{ width: 150 }}
+            style={{ width: 180 }}
             min={1}
             value={systemConfig?.cronConcurrency}
             onChange={(value) => {
               setSystemConfig({ ...systemConfig, cronConcurrency: value });
             }}
           />
-          <Button type="primary" onClick={updateSystemConfig}>
+          <Button
+            type="primary"
+            onClick={() => {
+              updateSystemConfig('cron-concurrency');
+            }}
+            style={{ width: 84 }}
+          >
             {intl.get('确认')}
           </Button>
         </Input.Group>
+      </Form.Item>
+      <Form.Item label={intl.get('语言')} name="lang">
+        <Select
+          defaultValue={localStorage.getItem('lang') || ''}
+          style={{ width: 264 }}
+          onChange={handleLangChange}
+          options={[
+            { value: '', label: intl.get('跟随系统') },
+            { value: 'zh', label: '简体中文' },
+            { value: 'en', label: 'English' },
+          ]}
+        />
       </Form.Item>
       <Form.Item label={intl.get('数据备份还原')} name="frequency">
         <Button type="primary" onClick={exportData} loading={exportLoading}>
@@ -218,13 +272,19 @@ const Other = ({
           method="put"
           showUploadList={false}
           maxCount={1}
-          action="/api/system/data/import"
-          onChange={(e) => {
-            if (e.event?.percent) {
-              showUploadProgress(parseFloat(e.event?.percent.toFixed(1)));
-              if (e.event?.percent === 100) {
-                showReloadModal();
-              }
+          action={`${config.apiPrefix}system/data/import`}
+          onChange={({ file, event }) => {
+            if (event?.percent) {
+              showUploadProgress(
+                Math.min(parseFloat(event?.percent.toFixed(1)), 99),
+              );
+            }
+            if (file.status === 'done') {
+              showUploadProgress(100);
+              showReloadModal();
+            }
+            if (file.status === 'error') {
+              message.error('上传失败');
             }
           }}
           name="data"
@@ -238,7 +298,7 @@ const Other = ({
         </Upload>
       </Form.Item>
       <Form.Item label={intl.get('检查更新')} name="update">
-        <CheckUpdate systemInfo={systemInfo} socketMessage={socketMessage} />
+        <CheckUpdate systemInfo={systemInfo} />
       </Form.Item>
     </Form>
   );
