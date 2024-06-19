@@ -44,6 +44,11 @@ const push_config = {
   PUSH_PLUS_TOKEN: '', // push+ 微信推送的用户令牌
   PUSH_PLUS_USER: '', // push+ 微信推送的群组编码
 
+  // 微加机器人，官方网站：https://www.weplusbot.com/
+  WE_PLUS_BOT_TOKEN: '', // 微加机器人的用户令牌
+  WE_PLUS_BOT_RECEIVER: '', // 微加机器人的消息接收人
+  WE_PLUS_BOT_VERSION: 'pro', //微加机器人调用版本，pro和personal；为空默认使用pro(专业版)，个人版填写：personal
+
   QMSG_KEY: '', // qmsg 酱的 QMSG_KEY
   QMSG_TYPE: '', // qmsg 酱的 QMSG_TYPE
 
@@ -92,7 +97,6 @@ const push_config = {
   WEBHOOK_CONTENT_TYPE: '', // 自定义通知 content-type
 };
 
-// 首先读取 面板变量 或者 github action 运行变量
 for (const key in push_config) {
   const v = process.env[key];
   if (v) {
@@ -353,17 +357,24 @@ function barkNotify(text, desp, params = {}) {
         BARK_PUSH = `https://api.day.app/${BARK_PUSH}`;
       }
       const options = {
-        url: `${BARK_PUSH}/${encodeURIComponent(text)}/${encodeURIComponent(
-          desp,
-        )}?icon=${BARK_ICON}&sound=${BARK_SOUND}&group=${BARK_GROUP}&isArchive=${BARK_ARCHIVE}&level=${BARK_LEVEL}&url=${BARK_URL}&${querystring.stringify(
-          params,
-        )}`,
+        url: `${BARK_PUSH}`,
+        json: {
+          title: text,
+          body: desp,
+          icon: BARK_ICON,
+          sound: BARK_SOUND,
+          group: BARK_GROUP,
+          isArchive: BARK_ARCHIVE,
+          level: BARK_LEVEL,
+          url: BARK_URL,
+          ...params,
+        },
         headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Type': 'application/json',
         },
         timeout,
       };
-      $.get(options, (err, resp, data) => {
+      $.post(options, (err, resp, data) => {
         try {
           if (err) {
             console.log('Bark APP 发送通知调用API失败😞\n', err);
@@ -801,6 +812,55 @@ function pushPlusNotify(text, desp) {
   });
 }
 
+function wePlusBotNotify(text, desp) {
+  return new Promise((resolve) => {
+    const { WE_PLUS_BOT_TOKEN, WE_PLUS_BOT_RECEIVER, WE_PLUS_BOT_VERSION } =
+      push_config;
+    if (WE_PLUS_BOT_TOKEN) {
+      const template = 'txt';
+      if (desp.length > 800) {
+        desp = desp.replace(/[\n\r]/g, '<br>');
+        template = 'html';
+      }
+      const body = {
+        token: `${WE_PLUS_BOT_TOKEN}`,
+        title: `${text}`,
+        content: `${desp}`,
+        template: `${template}`,
+        receiver: `${WE_PLUS_BOT_RECEIVER}`,
+        version: `${WE_PLUS_BOT_VERSION}`,
+      };
+      const options = {
+        url: `https://www.weplusbot.com/send`,
+        body: JSON.stringify(body),
+        headers: {
+          'Content-Type': ' application/json',
+        },
+        timeout,
+      };
+      $.post(options, (err, resp, data) => {
+        try {
+          if (err) {
+            console.log(`微加机器人发送通知消息失败😞\n`, err);
+          } else {
+            if (data.code === 200) {
+              console.log(`微加机器人发送通知消息完成🎉\n`);
+            } else {
+              console.log(`微加机器人发送通知消息异常 ${data.msg}\n`);
+            }
+          }
+        } catch (e) {
+          $.logErr(e, resp);
+        } finally {
+          resolve(data);
+        }
+      });
+    } else {
+      resolve();
+    }
+  });
+}
+
 function aibotkNotify(text, desp) {
   return new Promise((resolve) => {
     const { AIBOTK_KEY, AIBOTK_TYPE, AIBOTK_NAME } = push_config;
@@ -935,11 +995,11 @@ async function smtpNotify(text, desp) {
 
 function pushMeNotify(text, desp, params = {}) {
   return new Promise((resolve) => {
-    const { PUSHME_KEY } = push_config;
+    const { PUSHME_KEY, PUSHME_URL } = push_config;
     if (PUSHME_KEY) {
       const options = {
-        url: `https://push.i-i.me?push_key=${PUSHME_KEY}`,
-        json: { title: text, content: desp, ...params },
+        url: PUSHME_URL || 'https://push.i-i.me',
+        json: { push_key: PUSHME_KEY, title: text, content: desp, ...params },
         headers: {
           'Content-Type': 'application/json',
         },
@@ -1229,13 +1289,14 @@ async function sendNotify(text, desp, params = {}) {
     }
   }
 
-  if (push_config.HITOKOTO) {
+  if (push_config.HITOKOTO !== 'false') {
     desp += '\n\n' + (await one());
   }
 
   await Promise.all([
     serverNotify(text, desp), // 微信server酱
     pushPlusNotify(text, desp), // pushplus
+    wePlusBotNotify(text, desp), // 微加机器人
     barkNotify(text, desp, params), // iOS Bark APP
     tgBotNotify(text, desp), // telegram 机器人
     ddBotNotify(text, desp), // 钉钉机器人

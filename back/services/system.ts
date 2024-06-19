@@ -24,7 +24,7 @@ import {
 import { NotificationInfo } from '../data/notify';
 import {
   AuthDataType,
-  AuthInfo,
+  SystemInfo,
   SystemInstance,
   SystemModel,
   SystemModelInfo,
@@ -47,18 +47,21 @@ export default class SystemService {
 
   public async getSystemConfig() {
     const doc = await this.getDb({ type: AuthDataType.systemConfig });
-    return doc || ({} as SystemInstance);
+    return doc;
   }
 
-  private async updateAuthDb(payload: AuthInfo): Promise<SystemInstance> {
+  private async updateAuthDb(payload: SystemInfo): Promise<SystemInfo> {
     await SystemModel.upsert({ ...payload });
     const doc = await this.getDb({ type: payload.type });
     return doc;
   }
 
-  public async getDb(query: any): Promise<SystemInstance> {
-    const doc: any = await SystemModel.findOne({ where: { ...query } });
-    return doc && doc.get({ plain: true });
+  public async getDb(query: any): Promise<SystemInfo> {
+    const doc = await SystemModel.findOne({ where: { ...query } });
+    if (!doc) {
+      throw new Error(`System ${JSON.stringify(query)} not found`);
+    }
+    return doc.get({ plain: true });
   }
 
   public async updateNotificationMode(notificationInfo: NotificationInfo) {
@@ -348,20 +351,13 @@ export default class SystemService {
     }
   }
 
-  public async run(
-    { command, logPath }: { command: string; logPath: string },
-    callback: TaskCallbacks,
-  ) {
+  public async run({ command }: { command: string }, callback: TaskCallbacks) {
     if (!command.startsWith(TASK_COMMAND)) {
       command = `${TASK_COMMAND} ${command}`;
     }
-    this.scheduleService.runTask(
-      `real_log_path=${logPath} real_time=true ${command}`,
-      callback,
-      {
-        command,
-      },
-    );
+    this.scheduleService.runTask(`real_time=true ${command}`, callback, {
+      command,
+    });
   }
 
   public async stop({ command, pid }: { command: string; pid: number }) {
@@ -388,7 +384,9 @@ export default class SystemService {
 
   public async exportData(res: Response) {
     try {
-      await promiseExec(`cd ${config.rootPath} && tar -zcvf ${config.dataTgzFile} data/`);
+      await promiseExec(
+        `cd ${config.rootPath} && tar -zcvf ${config.dataTgzFile} data/`,
+      );
       res.download(config.dataTgzFile);
     } catch (error: any) {
       return res.send({ code: 400, message: error.message });

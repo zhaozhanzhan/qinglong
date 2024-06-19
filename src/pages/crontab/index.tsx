@@ -57,6 +57,7 @@ import { useVT } from 'virtualizedtableforantd4';
 import { ICrontab, OperationName, OperationPath, CrontabStatus } from './type';
 import Name from '@/components/name';
 import dayjs from 'dayjs';
+import { noop } from 'lodash';
 
 const { Text, Paragraph, Link } = Typography;
 const { Search } = Input;
@@ -75,18 +76,16 @@ const Crontab = () => {
           style={{
             wordBreak: 'break-all',
             marginBottom: 0,
-            color: '#1890ff'
+            color: '#1890ff',
+            cursor: 'pointer',
           }}
           ellipsis={{ tooltip: text, rows: 2 }}
+          onClick={() => {
+            setDetailCron(record);
+            setIsDetailModalVisible(true);
+          }}
         >
-          <Link
-            onClick={() => {
-              setDetailCron(record);
-              setIsDetailModalVisible(true);
-            }}
-          >
-            {record.name || '-'}
-          </Link>
+          <Link>{record.name || '-'}</Link>
         </Paragraph>
       ),
       sorter: {
@@ -272,9 +271,14 @@ const Crontab = () => {
         record.sub_id ? (
           <Name
             service={() =>
-              request.get(`${config.apiPrefix}subscriptions/${record.sub_id}`)
+              request.get(`${config.apiPrefix}subscriptions/${record.sub_id}`, {
+                onError: noop,
+              })
             }
-            options={{ ready: record?.sub_id, cacheKey: record.sub_id }}
+            options={{
+              ready: record?.sub_id,
+              cacheKey: record.sub_id,
+            }}
           />
         ) : (
           '-'

@@ -95,6 +95,7 @@ export default {
     { value: 'aibotk', label: intl.get('智能微秘书') },
     { value: 'iGot', label: 'IGot' },
     { value: 'pushPlus', label: 'PushPlus' },
+    { value: 'wePlusBot', label: intl.get('微加机器人') },
     { value: 'chat', label: intl.get('群晖chat') },
     { value: 'email', label: intl.get('邮箱') },
     { value: 'lark', label: intl.get('飞书机器人') },
@@ -312,6 +313,27 @@ export default {
         ),
       },
     ],
+    wePlusBot: [
+      {
+        label: 'wePlusBotToken',
+        tip: intl.get(
+          '用户令牌，扫描登录后 我的—>设置->令牌 中获取，参考 https://www.weplusbot.com/',
+        ),
+        required: true,
+      },
+      {
+        label: 'wePlusBotReceiver',
+        tip: intl.get(
+          '消息接收人',
+        ),
+      },
+      {
+        label: 'wePlusBotVersion',
+        tip: intl.get(
+          '调用版本；专业版填写pro，个人版填写personal，为空默认使用专业版',
+        ),
+      },
+    ],
     lark: [
       {
         label: 'larkKey',
@@ -337,6 +359,11 @@ export default {
         label: 'pushMeKey',
         tip: intl.get('PushMe的Key，https://push.i-i.me/'),
         required: true,
+      },
+      {
+        label: 'pushMeUrl',
+        tip: intl.get('自建的PushMeServer消息接口地址，例如：http://127.0.0.1:3010，不填则使用官方消息接口'),
+        required: false,
       },
     ],
     chronocat: [

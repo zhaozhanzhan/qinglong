@@ -375,7 +375,10 @@ export default class CronService {
 
   public async getDb(query: FindOptions<Crontab>['where']): Promise<Crontab> {
     const doc: any = await CrontabModel.findOne({ where: { ...query } });
-    return doc && (doc.get({ plain: true }) as Crontab);
+    if (!doc) {
+      throw new Error(`Cron ${JSON.stringify(query)} not found`);
+    }
+    return doc.get({ plain: true });
   }
 
   public async run(ids: number[]) {
@@ -407,7 +410,7 @@ export default class CronService {
   }
 
   private async runSingle(cronId: number): Promise<number | void> {
-    return taskLimit.runWithCronLimit(() => {
+    return taskLimit.manualRunWithCronLimit(() => {
       return new Promise(async (resolve: any) => {
         const cron = await this.getDb({ id: cronId });
         const params = {
@@ -434,9 +437,11 @@ export default class CronService {
         }
         const logPath = `${uniqPath}/${logTime}.log`;
         const absolutePath = path.resolve(config.logPath, `${logPath}`);
-
         const cp = spawn(
-          `real_log_path=${logPath} no_delay=true ${this.makeCommand(cron)}`,
+          `real_log_path=${logPath} no_delay=true ${this.makeCommand(
+            cron,
+            true,
+          )}`,
           { shell: '/bin/bash' },
         );
 
@@ -444,11 +449,14 @@ export default class CronService {
           { status: CrontabStatus.running, pid: cp.pid, log_path: logPath },
           { where: { id } },
         );
+        cp.stdout.on('data', async (data) => {
+          await fs.appendFile(absolutePath, data.toString());
+        });
         cp.stderr.on('data', async (data) => {
-          await fs.appendFile(`${absolutePath}`, `${data.toString()}`);
+          await fs.appendFile(absolutePath, data.toString());
         });
         cp.on('error', async (err) => {
-          await fs.appendFile(`${absolutePath}`, `${JSON.stringify(err)}`);
+          await fs.appendFile(absolutePath, JSON.stringify(err));
         });
 
         cp.on('exit', async (code) => {
@@ -524,12 +532,14 @@ export default class CronService {
     }
   }
 
-  private makeCommand(tab: Crontab) {
+  private makeCommand(tab: Crontab, realTime?: boolean) {
     let command = tab.command.trim();
     if (!command.startsWith(TASK_PREFIX) && !command.startsWith(QL_PREFIX)) {
       command = `${TASK_PREFIX}${tab.command}`;
     }
-    let commandVariable = `no_tee=true ID=${tab.id} `;
+    let commandVariable = `real_time=${Boolean(realTime)} no_tee=true ID=${
+      tab.id
+    } `;
     if (tab.task_before) {
       commandVariable += `task_before='${tab.task_before
         .replace(/'/g, "'\\''")

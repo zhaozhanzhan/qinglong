@@ -14,6 +14,7 @@ export enum NotificationMode {
   'aibotk' = 'aibotk',
   'iGot' = 'iGot',
   'pushPlus' = 'pushPlus',
+  'wePlusBot' = 'wePlusBot',
   'email' = 'email',
   'pushMe' = 'pushMe',
   'feishu' = 'feishu',
@@ -100,6 +101,12 @@ export class PushPlusNotification extends NotificationBaseInfo {
   public pushPlusUser = '';
 }
 
+export class WePlusBotNotification extends NotificationBaseInfo {
+  public wePlusBotToken = '';
+  public wePlusBotReceiver = '';
+  public wePlusBotVersion = '';
+}
+
 export class EmailNotification extends NotificationBaseInfo {
   public emailService: string = '';
   public emailUser: string = '';
@@ -108,6 +115,7 @@ export class EmailNotification extends NotificationBaseInfo {
 
 export class PushMeNotification extends NotificationBaseInfo {
   public pushMeKey: string = '';
+  public pushMeUrl: string = '';
 }
 
 export class ChronocatNotification extends NotificationBaseInfo {
@@ -145,9 +153,10 @@ export interface NotificationInfo
     AibotkNotification,
     IGotNotification,
     PushPlusNotification,
+    WePlusBotNotification,
     EmailNotification,
     PushMeNotification,
     WebhookNotification,
     ChronocatNotification,
     LarkNotification {}
-    
+
